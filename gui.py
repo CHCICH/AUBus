@@ -86,9 +86,9 @@ window.setStyleSheet("""
     }
 
     QComboBox QAbstractItemView {
-        background-color: #f4f9ff;
-        selection-background-color: #004080;
-        selection-color: white;
+        background-color: gray;
+        selection-background-color: lightgray;
+        selection-color: black;
     }
 
     QLabel#error {
@@ -104,7 +104,6 @@ tabs.setTabPosition(QTabWidget.North)
 tabs.setStyleSheet("QTabWidget::tab-bar { alignment: center; }")
 
 # Login tab
-
 login_tab = QWidget()
 login_layout_1 = QVBoxLayout()
 
@@ -155,13 +154,11 @@ login_password_layout.addWidget(login_pass_showbtn)
 login_layout.addLayout(login_password_layout)
 
 # add a label so that if i need to display any error i display it here
-
 login_error_lbl = QLabel("")
 login_error_lbl.setObjectName("error")
 login_layout.addWidget(login_error_lbl, alignment=Qt.AlignCenter)
 
 # add a login button and it's functionalities 
-
 def login():
     username_txt = login_user_box.text().strip()
     password_txt = login_pass_box.text().strip()
@@ -219,7 +216,6 @@ tabs.addTab(login_tab, "Login")
 ##########################
 
 # Sign up tab
-
 signup_tab = QWidget()
 signup_layout_1 = QVBoxLayout()
 
@@ -298,7 +294,7 @@ signup_role_layout.addWidget(signup_role_combobox)
 
 signup_layout.addLayout(signup_role_layout)
 
-# The Area horizontal layour
+# The Area horizontal layout
 signup_area_layout = QHBoxLayout()
 signup_area_lbl = QLabel("Area : ")
 signup_area_combobox = QComboBox(editable = True, insertPolicy = QComboBox.InsertAtTop)
@@ -310,13 +306,11 @@ signup_area_layout.addWidget(signup_area_combobox)
 signup_layout.addLayout(signup_area_layout)
 
 # add a label so that if i need to display any error i display it here
-
 signup_error_lbl = QLabel("")
 signup_error_lbl.setObjectName("error")
 signup_layout.addWidget(signup_error_lbl, alignment=Qt.AlignCenter)
 
-# add a login button and it's functionalities 
-
+# add a signup button and it's functionalities 
 def signup():
     fullname_txt = signup_fullname_box.text().strip()
     email_txt = signup_email_box.text().strip()
