@@ -9,10 +9,12 @@ def personal_info_manager(data):
         return handle_edit_role(data)
     elif req_code == "edit_name":
         return handle_edit_name(data)
-    elif req_code == "edit_schdule":
-        return handle_edit_schedule(data)
     elif req_code == "add_ride":
         return add_ride(data)
+    elif req_code == "remove_ride":
+        return remove_ride(data)
+    elif req_code == "remove_schedule":
+        return remove_schedule(data)
     else:
         return {"status": "400", "message": "Invalid request type"}
 
@@ -113,7 +115,3 @@ def remove_schedule(data):
         return {"status": "200", "message": "Schedule removed successfully"}
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
-
-def handle_edit_schedule(data):
-    pass
-

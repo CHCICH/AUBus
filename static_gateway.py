@@ -25,6 +25,10 @@ def handle_client(client_socket):
                 response = handle_sign_up(data)
             elif action == "update_personal_info":
                 response = personal_info_manager(data)
+            elif action == "quit":
+                response = {"status": "200", "message": "Connection closed"}
+                client_socket.send(json.dumps(response).encode('utf-8'))
+                break
             else:
                 response = {"status": "400", "message": "Invalid action"}
             client_socket.send(json.dumps(response).encode('utf-8'))
