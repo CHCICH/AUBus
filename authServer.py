@@ -14,7 +14,7 @@ def emaiIsCorrect(email):
     return False
 
 def generate_ID(username):
-    return str(int(time.time() * 13* 1000)) + username[:3] + str(int(time.time() * 7 * 1000))
+    return int(time.time())
 
 def handle_login(data):
     username = data.get("userName")
@@ -49,10 +49,11 @@ def handle_sign_up(data):
             return {"status": "400", "message": "Username or email already exists"}
         if not emaiIsCorrect(email):
             return {"status": "400", "message": "Email is not valid please provide a valid email"}
-        cur.execute('INSERT INTO "user" (username, password, email, isDriver, aubID, userID) VALUES (?, ?, ?, ?, ?, ?)', (username, password, email, isDriver, aubID, generate_ID(username)))
+        userID = generate_ID(username)
+        cur.execute('INSERT INTO "user" (username, password, email, isDriver, aubID, userID) VALUES (?, ?, ?, ?, ?, ?)', (username, password, email, bool(isDriver), int(aubID), int(userID)))
         conn.commit()
         conn.close()
-        return {"status": "201", "message": "User created successfully", "data":{"username": username, "email": email, "isDriver": isDriver, "aubID": aubID, "userID": generate_ID(username)}}
+        return {"status": "201", "message": "User created successfully", "data":{"username": username, "email": email, "isDriver": isDriver, "aubID": aubID, "userID": userID}}
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
 
