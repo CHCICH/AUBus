@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS Request (
     FOREIGN KEY(riderID) REFERENCES "user"(userID) ON DELETE CASCADE,
     FOREIGN KEY(rideID) REFERENCES Ride(rideID) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS IpInfos (
+    userID     INTEGER,
+    userCurrentIP TEXT NOT NULL,
+    FOREIGN KEY(userID) REFERENCES "user"(userID) ON DELETE CASCADE
+);
 """
 
 def create_schema(db_path: str = "aubus.db") -> None:
@@ -71,4 +77,6 @@ def create_schema(db_path: str = "aubus.db") -> None:
         conn.commit()
     finally:
         conn.close()
+
+create_schema()
 
