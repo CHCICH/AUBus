@@ -20,9 +20,9 @@ def handle_login(data):
     username = data.get("userName")
     password = data.get("password")
     try:
-        conn = sqlite3.connect('users.db')
+        conn = sqlite3.connect('aubus.db')
         cur = conn.cursor()
-        cur.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
+        cur.execute('SELECT * FROM "user" WHERE username=? AND password=?', (username, password))
         user = cur.fetchone()
         conn.close()
     except sqlite3.Error as e:
@@ -40,16 +40,16 @@ def handle_sign_up(data):
     isDriver = data.get("isDriver", False)
     aubID = data.get("aubID", None)
     try:
-        conn = sqlite3.connect('users.db')
+        conn = sqlite3.connect('aubus.db')
         cur = conn.cursor()
-        cur.execute("SELECT * FROM users WHERE username=? OR email=? OR aubID=?", (username, email, aubID))
+        cur.execute('SELECT * FROM "user" WHERE username=? OR email=? OR aubID=?', (username, email, aubID))
         existing_user = cur.fetchone()
         if existing_user:
             conn.close()
             return {"status": "400", "message": "Username or email already exists"}
         if not emaiIsCorrect(email):
             return {"status": "400", "message": "Email is not valid please provide a valid email"}
-        cur.execute("INSERT INTO users (username, password, email, isDriver, aubID, userID) VALUES (?, ?, ?, ?, ?, ?)", (username, password, email, isDriver, aubID, generate_ID(username)))
+        cur.execute('INSERT INTO "user" (username, password, email, isDriver, aubID, userID) VALUES (?, ?, ?, ?, ?, ?)', (username, password, email, isDriver, aubID, generate_ID(username)))
         conn.commit()
         conn.close()
         return {"status": "201", "message": "User created successfully", "data":{"username": username, "email": email, "isDriver": isDriver, "aubID": aubID, "userID": generate_ID(username)}}
