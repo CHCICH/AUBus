@@ -5,6 +5,8 @@ from authServer import authenticate
 import json
 import sys
 
+
+
 app = QApplication(sys.argv)
 window = QWidget()
 window.setFixedSize(700, 700)
