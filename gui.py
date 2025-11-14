@@ -1,474 +1,424 @@
-from PyQt5.QtWidgets import *
-from PyQt5.QtGui import QFont
-from PyQt5.QtCore import Qt
-import json
+"""
+A minimal PyQt5 GUI for AUBus implementing Login and Sign-up functionality.
+
+UI design notes:
+- Color palette: red (#cc0000), black, white
+- Two tabs: Login and Sign Up
+- Communicates with the project's TCP gateway (static_gateway.py) on port 9999.
+
+Run:
+    python gui.py
+
+If PyQt5 is not installed: pip install PyQt5
+"""
+
 import sys
+import socket
+import json
+from PyQt5.QtWidgets import *
+from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QFont
 
-app = QApplication(sys.argv)
-window = QWidget()
-window.setMinimumSize(1000, 950)
-window.resize(1100, 1000)
-window.setWindowTitle("AUB RideShare")
+GATEWAY_HOST = socket.gethostname()
+GATEWAY_PORT = 9999
 
-# AUB themed stylesheet with larger fonts and proper spacing
-window.setStyleSheet("""
-    QWidget {
-        background: qlineargradient(
-            x1:0, y1:0, x2:1, y2:1,
-            stop:0 #1a1a1a, stop:0.5 #2d2d2d, stop:1 #1a1a1a
-        );
-        font-family: 'Segoe UI', Arial, sans-serif;
-    }
 
-    QTabWidget::pane {
-        border: none;
-        background: white;
-        border-radius: 20px;
-        margin-top: 50px;
-    }
+def send_gateway_request(payload, host=GATEWAY_HOST, port=GATEWAY_PORT, timeout=5.0):
+    """Send a JSON payload to the static gateway and return parsed JSON response.
+    Uses a short-lived TCP connection per request.
+    Returns a dict on success or a dict with status '500' on error.
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect((host, port))
+        s.send(json.dumps(payload).encode("utf-8"))
+        resp_raw = s.recv(8192).decode("utf-8")
+        try:
+            resp = json.loads(resp_raw)
+        except Exception:
+            resp = {"status": "500", "message": "Invalid JSON response from gateway", "raw": resp_raw}
+        # politely close
+        try:
+            s.send(json.dumps({"action": "quit"}).encode("utf-8"))
+        except Exception:
+            pass
+        s.close()
+        return resp
+    except Exception as e:
+        return {"status": "500", "message": f"Gateway connection error: {e}"}
 
-    QTabBar {
-        background: transparent;
-        qproperty-alignment: AlignCenter;
-    }
 
-    QTabBar::tab {
-        background: rgba(255, 255, 255, 0.1);
-        color: rgba(255, 255, 255, 0.7);
-        padding: 18px 70px;
-        font-weight: 700;
-        font-size: 20px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        margin-right: 15px;
-        border-radius: 15px 15px 0px 0px;
-        margin-bottom: -2px;
-    }
+class AUBusWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("AUBus")
+        self.resize(1000, 700)
+        self.apply_styles()
+        self.init_ui()
 
-    QTabBar::tab:selected {
-        background: white;
-        color: #8B0000;
-        border: 2px solid white;
-        border-bottom: none;
-    }
-
-    QTabBar::tab:hover:!selected {
-        background: rgba(255, 255, 255, 0.2);
-        color: white;
-        border: 2px solid rgba(255, 255, 255, 0.5);
-    }
-
-    QTabBar::tab:hover:!selected {
-        color: white;
-    }
-
-    QFrame {
-        background-color: transparent;
-        border-radius: 0px;
-        padding: 0px;
-        border: none;
-    }
-
-    QScrollArea {
-        background: white;
-        border: none;
-    }
-
-    QScrollBar:vertical {
-        background: transparent;
-        width: 12px;
-        margin: 0px;
-        border-radius: 6px;
-    }
-
-    QScrollBar::handle:vertical {
-        background: rgba(139, 0, 0, 0.3);
-        border-radius: 6px;
-        min-height: 30px;
-    }
-
-    QScrollBar::handle:vertical:hover {
-        background: rgba(139, 0, 0, 0.5);
-    }
-
-    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-        height: 0px;
-    }
-
-    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-        background: none;
-    }
-
-    QLabel {
-        color: #1a1a1a;
-        font-size: 16px;
-        font-weight: 500;
-        border: none;
-        background: transparent;
-        padding: 5px 0px;
-    }
-
-    QLabel#header {
-        font-size: 36px;
-        font-weight: 700;
-        color: #8B0000;
-        margin-bottom: 15px;
-        padding: 10px;
-    }
-
-    QLabel#subtitle {
-        font-size: 16px;
-        color: #666666;
-        font-weight: 400;
-        margin-bottom: 30px;
-        padding: 5px;
-    }
-
-    QLineEdit {
-        background-color: #f8f8f8;
-        border: 2px solid #e0e0e0;
-        border-radius: 12px;
-        padding: 16px 20px;
-        color: #1a1a1a;
-        font-size: 16px;
-        selection-background-color: #8B0000;
-        selection-color: white;
-    }
-
-    QLineEdit:focus {
-        border: 2px solid #8B0000;
-        background-color: white;
-    }
-
-    QPushButton {
-        background: qlineargradient(
-            x1:0, y1:0, x2:1, y2:0,
-            stop:0 #8B0000, stop:1 #B22222
-        );
-        color: white;
-        border-radius: 12px;
-        padding: 16px 24px;
-        font-weight: 600;
-        font-size: 16px;
-        border: none;
-    }
-
-    QPushButton:hover {
-        background: qlineargradient(
-            x1:0, y1:0, x2:1, y2:0,
-            stop:0 #A00000, stop:1 #C93030
-        );
-    }
-
-    QPushButton:pressed {
-        padding-top: 18px;
-        padding-bottom: 14px;
-    }
-
-    QPushButton#show_btn {
-        background: #2d2d2d;
-        color: white;
-        padding: 12px 20px;
-        font-size: 14px;
-    }
-
-    QPushButton#show_btn:hover {
-        background: #3d3d3d;
-    }
-
-    QComboBox {
-        background-color: #f8f8f8;
-        border: 2px solid #e0e0e0;
-        border-radius: 12px;
-        padding: 16px 20px;
-        color: #1a1a1a;
-        font-size: 16px;
-    }
-
-    QComboBox:focus {
-        border: 2px solid #8B0000;
-    }
-
-    QComboBox::drop-down {
-        border: none;
-        width: 35px;
-    }
-
-    QComboBox QAbstractItemView {
-        background-color: white;
-        border: 2px solid #e0e0e0;
-        border-radius: 10px;
-        selection-background-color: #8B0000;
-        selection-color: white;
-        padding: 8px;
-        font-size: 16px;
-    }
-
-    QLabel#error {
-        color: #8B0000;
-        font-weight: 600;
-        font-size: 15px;
-        padding: 15px;
-        background: #ffe6e6;
-        border-radius: 10px;
-    }
-
-    QLabel#success {
-        color: #1a5f1a;
-        font-weight: 600;
-        font-size: 15px;
-        padding: 15px;
-        background: #e6f5e6;
-        border-radius: 10px;
-    }
-""")
-
-def create_input_group(label_text, placeholder, is_password=False):
-    """Helper function to create input groups with proper sizing"""
-    container = QVBoxLayout()
-    container.setSpacing(12)
-    
-    label = QLabel(label_text)
-    label.setFont(QFont("Segoe UI", 16, QFont.Medium))
-    container.addWidget(label)
-    
-    h_layout = QHBoxLayout()
-    h_layout.setSpacing(15)
-    
-    input_box = QLineEdit()
-    input_box.setPlaceholderText(placeholder)
-    input_box.setFont(QFont("Segoe UI", 15))
-    input_box.setMinimumHeight(50)
-    
-    if is_password:
-        input_box.setEchoMode(QLineEdit.Password)
-        show_btn = QPushButton("Show")
-        show_btn.setObjectName("show_btn")
-        show_btn.setFixedSize(100, 50)
-        show_btn.setFont(QFont("Segoe UI", 13))
+    def apply_styles(self):
+        red = "#cc0000"
+        dark = "#0f0f10"
+        mid = "#1b1b1c"
+        white = "#ffffff"
         
-        def toggle_password():
-            if input_box.echoMode() == QLineEdit.Normal:
-                input_box.setEchoMode(QLineEdit.Password)
-                show_btn.setText("Show")
-            else:
-                input_box.setEchoMode(QLineEdit.Normal)
-                show_btn.setText("Hide")
+        self.setStyleSheet(f"""
+            QMainWindow {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {dark}, stop:1 {mid});
+            }}
+            
+            QWidget {{
+                background: transparent;
+                color: {white};
+                font-family: Arial;
+                font-size: 16px;
+            }}
+            
+            QTabWidget::pane {{
+                border: 0;
+                background: transparent;
+                margin-top: 70px;
+            }}
+            
+            QTabBar::tab {{
+                background: rgba(255, 255, 255, 0.1);
+                color: {white};
+                padding: 25px 80px;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                font-size: 20px;
+                font-weight: bold;
+                margin-right: 15px;
+                border-radius: 15px 15px 0px 0px;
+                margin-bottom: 0px;
+                min-width: 120px;
+            }}
+            
+            QTabBar::tab:selected {{
+                background: white;
+                color: {red};
+                border: 2px solid white;
+                border-bottom: none;
+            }}
+            
+            QTabBar::tab:hover:!selected {{
+                background: rgba(255, 255, 255, 0.2);
+                border: 2px solid rgba(255, 255, 255, 0.5);
+            }}
+            
+            QScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+            
+            QScrollBar:vertical {{
+                background: transparent;
+                width: 14px;
+                margin: 0px;
+                border-radius: 7px;
+            }}
+            
+            QScrollBar::handle:vertical {{
+                background: rgba(204, 0, 0, 0.4);
+                border-radius: 7px;
+                min-height: 30px;
+            }}
+            
+            QScrollBar::handle:vertical:hover {{
+                background: rgba(204, 0, 0, 0.6);
+            }}
+            
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
+            
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+                background: none;
+            }}
+            
+            QLabel {{
+                color: {white};
+                font-size: 16px;
+                padding: 5px;
+            }}
+            
+            QLabel#title {{
+                font-size: 32px;
+                font-weight: bold;
+                color: {red};
+                margin-bottom: 20px;
+            }}
+            
+            QLineEdit {{
+                background: rgba(255, 255, 255, 0.05);
+                border: 2px solid rgba(255, 255, 255, 0.2);
+                padding: 15px;
+                color: {white};
+                border-radius: 10px;
+                font-size: 16px;
+                min-height: 20px;
+            }}
+            
+            QLineEdit:focus {{
+                border: 2px solid {red};
+                background: rgba(255, 255, 255, 0.08);
+            }}
+            
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {red}, stop:1 #a80000);
+                color: {white};
+                border-radius: 10px;
+                padding: 15px 30px;
+                font-weight: bold;
+                font-size: 16px;
+                min-width: 150px;
+            }}
+            
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #e53939, stop:1 {red});
+            }}
+            
+            QPushButton:pressed {{
+                padding-top: 17px;
+                padding-bottom: 13px;
+            }}
+            
+            QCheckBox {{
+                color: {white};
+                font-size: 16px;
+                spacing: 10px;
+            }}
+            
+            QCheckBox::indicator {{
+                width: 20px;
+                height: 20px;
+                border: 2px solid rgba(255, 255, 255, 0.3);
+                border-radius: 4px;
+                background: rgba(255, 255, 255, 0.05);
+            }}
+            
+            QCheckBox::indicator:checked {{
+                background: {red};
+                border: 2px solid {red};
+            }}
+        """)
+
+    def init_ui(self):
+        # Main container with padding
+        container = QWidget()
+        container_layout = QVBoxLayout()
+        container_layout.setContentsMargins(60, 60, 60, 60)
         
-        show_btn.clicked.connect(toggle_password)
-        h_layout.addWidget(input_box, stretch=1)
-        h_layout.addWidget(show_btn, stretch=0)
-    else:
-        h_layout.addWidget(input_box)
-    
-    container.addLayout(h_layout)
-    return container, input_box
+        tabs = QTabWidget()
+        tabs.addTab(self.build_login_tab(), "Login")
+        tabs.addTab(self.build_signup_tab(), "Sign Up")
+        
+        container_layout.addWidget(tabs)
+        container.setLayout(container_layout)
+        self.setCentralWidget(container)
 
-# Create tabs with centered alignment
-tabs = QTabWidget()
-tabs.setTabPosition(QTabWidget.North)
-tabs.setDocumentMode(True)
+    def build_login_tab(self):
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
+        # Create content widget
+        widget = QWidget()
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(120, 100, 120, 100)
+        main_layout.setSpacing(20)
+        
+        # Title
+        title = QLabel("AUBus — Login")
+        title.setObjectName("title")
+        title.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(title)
+        
+        main_layout.addSpacing(30)
+        
+        # Username
+        username_label = QLabel("Username:")
+        main_layout.addWidget(username_label)
+        
+        self.login_username = QLineEdit()
+        self.login_username.setPlaceholderText("Enter your username")
+        main_layout.addWidget(self.login_username)
+        
+        main_layout.addSpacing(20)
+        
+        # Password
+        password_label = QLabel("Password:")
+        main_layout.addWidget(password_label)
+        
+        self.login_password = QLineEdit()
+        self.login_password.setPlaceholderText("Enter your password")
+        self.login_password.setEchoMode(QLineEdit.Password)
+        main_layout.addWidget(self.login_password)
+        
+        main_layout.addSpacing(30)
+        
+        # Button
+        self.login_btn = QPushButton("Sign In")
+        self.login_btn.clicked.connect(self.on_login)
+        main_layout.addWidget(self.login_btn, alignment=Qt.AlignCenter)
+        
+        main_layout.addSpacing(20)
+        
+        # Message
+        self.login_msg = QLabel("")
+        self.login_msg.setAlignment(Qt.AlignCenter)
+        self.login_msg.setWordWrap(True)
+        main_layout.addWidget(self.login_msg)
+        
+        main_layout.addStretch()
+        
+        widget.setLayout(main_layout)
+        scroll.setWidget(widget)
+        return scroll
 
-# ==================== LOGIN TAB ====================
-login_tab = QWidget()
-login_scroll = QScrollArea()
-login_scroll.setWidgetResizable(True)
-login_scroll.setFrameShape(QFrame.NoFrame)
-login_scroll.setStyleSheet("background: white;")
+    def build_signup_tab(self):
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        
+        # Create content widget
+        widget = QWidget()
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(120, 100, 120, 100)
+        main_layout.setSpacing(15)
+        
+        # Title
+        title = QLabel("AUBus — Sign Up")
+        title.setObjectName("title")
+        title.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(title)
+        
+        main_layout.addSpacing(30)
+        
+        # Username
+        username_label = QLabel("Username:")
+        main_layout.addWidget(username_label)
+        
+        self.su_username = QLineEdit()
+        self.su_username.setPlaceholderText("Choose a username")
+        main_layout.addWidget(self.su_username)
+        
+        main_layout.addSpacing(15)
+        
+        # Password
+        password_label = QLabel("Password:")
+        main_layout.addWidget(password_label)
+        
+        self.su_password = QLineEdit()
+        self.su_password.setPlaceholderText("Create a password")
+        self.su_password.setEchoMode(QLineEdit.Password)
+        main_layout.addWidget(self.su_password)
+        
+        main_layout.addSpacing(15)
+        
+        # Email
+        email_label = QLabel("Email:")
+        main_layout.addWidget(email_label)
+        
+        self.su_email = QLineEdit()
+        self.su_email.setPlaceholderText("your.email@aub.edu.lb")
+        main_layout.addWidget(self.su_email)
+        
+        main_layout.addSpacing(15)
+        
+        # AUB ID
+        aubid_label = QLabel("AUB ID (optional):")
+        main_layout.addWidget(aubid_label)
+        
+        self.su_aubid = QLineEdit()
+        self.su_aubid.setPlaceholderText("e.g., 202012345")
+        main_layout.addWidget(self.su_aubid)
+        
+        main_layout.addSpacing(15)
+        
+        # Checkbox
+        self.su_isdriver = QCheckBox("I am a driver")
+        main_layout.addWidget(self.su_isdriver)
+        
+        main_layout.addSpacing(30)
+        
+        # Button
+        self.signup_btn = QPushButton("Create Account")
+        self.signup_btn.clicked.connect(self.on_signup)
+        main_layout.addWidget(self.signup_btn, alignment=Qt.AlignCenter)
+        
+        main_layout.addSpacing(20)
+        
+        # Message
+        self.signup_msg = QLabel("")
+        self.signup_msg.setAlignment(Qt.AlignCenter)
+        self.signup_msg.setWordWrap(True)
+        main_layout.addWidget(self.signup_msg)
+        
+        main_layout.addStretch()
+        
+        widget.setLayout(main_layout)
+        scroll.setWidget(widget)
+        return scroll
 
-login_content = QWidget()
-login_content.setStyleSheet("background: white;")
-login_main = QVBoxLayout()
-login_main.setContentsMargins(80, 80, 80, 60)
+    def on_login(self):
+        username = self.login_username.text().strip()
+        password = self.login_password.text().strip()
+        
+        if not username or not password:
+            self.login_msg.setText("Please enter username and password")
+            return
+            
+        self.login_msg.setText("Connecting...")
+        payload = {"action": "login", "userName": username, "password": password}
+        resp = send_gateway_request(payload)
+        self.login_msg.setText(f"{resp.get('status')}: {resp.get('message')}")
+        
+        if resp.get("status") == "200":
+            email = resp.get("email")
+            if email:
+                QMessageBox.information(self, "Logged in", f"Authenticated — email: {email}")
 
-login_layout = QVBoxLayout()
-login_layout.setSpacing(25)
+    def on_signup(self):
+        username = self.su_username.text().strip()
+        password = self.su_password.text().strip()
+        email = self.su_email.text().strip()
+        aubid = self.su_aubid.text().strip() or None
+        isdriver = self.su_isdriver.isChecked()
+        
+        if not username or not password or not email:
+            self.signup_msg.setText("Please enter username, password and email")
+            return
+            
+        self.signup_msg.setText("Connecting...")
+        payload = {
+            "action": "sign_up",
+            "userName": username,
+            "password": password,
+            "email": email,
+            "isDriver": isdriver,
+            "aubID": aubid,
+        }
+        resp = send_gateway_request(payload)
+        self.signup_msg.setText(f"{resp.get('status')}: {resp.get('message')}")
+        
+        if resp.get("status") == "201":
+            data = resp.get("data", {})
+            QMessageBox.information(self, "Account created", f"User created: {data.get('username')}\nEmail: {data.get('email')}")
 
-# Header
-header = QLabel("Welcome Back!")
-header.setObjectName("header")
-header.setAlignment(Qt.AlignCenter)
-login_layout.addWidget(header)
 
-subtitle = QLabel("Sign in to continue to AUB RideShare")
-subtitle.setObjectName("subtitle")
-subtitle.setAlignment(Qt.AlignCenter)
-login_layout.addWidget(subtitle)
+def main():
+    app = QApplication(sys.argv)
+    win = AUBusWindow()
+    win.showMaximized()
+    sys.exit(app.exec_())
 
-login_layout.addSpacing(20)
 
-# Username input
-username_layout, login_user_box = create_input_group(
-    "Username", 
-    "Enter your AUB username"
-)
-login_layout.addLayout(username_layout)
-
-# Password input
-password_layout, login_pass_box = create_input_group(
-    "Password", 
-    "Enter your password",
-    is_password=True
-)
-login_layout.addLayout(password_layout)
-
-login_layout.addSpacing(10)
-
-# Error label
-login_error_lbl = QLabel("")
-login_error_lbl.setObjectName("error")
-login_error_lbl.hide()
-login_layout.addWidget(login_error_lbl)
-
-# Login button
-def handle_login():
-    pass  # Will implement later
-
-login_btn = QPushButton("Sign In")
-login_btn.clicked.connect(handle_login)
-login_btn.setMinimumHeight(55)
-login_btn.setFont(QFont("Segoe UI", 16, QFont.Bold))
-login_layout.addWidget(login_btn)
-
-login_main.addLayout(login_layout)
-login_main.addStretch()
-login_content.setLayout(login_main)
-login_scroll.setWidget(login_content)
-
-login_tab_layout = QVBoxLayout()
-login_tab_layout.setContentsMargins(0, 0, 0, 0)
-login_tab_layout.addWidget(login_scroll)
-login_tab.setLayout(login_tab_layout)
-
-# ==================== SIGNUP TAB ====================
-signup_tab = QWidget()
-signup_scroll = QScrollArea()
-signup_scroll.setWidgetResizable(True)
-signup_scroll.setFrameShape(QFrame.NoFrame)
-signup_scroll.setStyleSheet("background: white;")
-
-signup_content = QWidget()
-signup_content.setStyleSheet("background: white;")
-signup_main = QVBoxLayout()
-signup_main.setContentsMargins(80, 80, 80, 60)
-
-signup_layout = QVBoxLayout()
-signup_layout.setSpacing(20)
-
-# Header
-header2 = QLabel("Create Account")
-header2.setObjectName("header")
-header2.setAlignment(Qt.AlignCenter)
-signup_layout.addWidget(header2)
-
-subtitle2 = QLabel("Join the AUB RideShare community")
-subtitle2.setObjectName("subtitle")
-subtitle2.setAlignment(Qt.AlignCenter)
-signup_layout.addWidget(subtitle2)
-
-signup_layout.addSpacing(15)
-
-# Full Name
-name_layout, signup_name_box = create_input_group(
-    "Full Name", 
-    "John Doe"
-)
-signup_layout.addLayout(name_layout)
-
-# Email
-email_layout, signup_email_box = create_input_group(
-    "AUB Email", 
-    "username@mail.aub.edu"
-)
-signup_layout.addLayout(email_layout)
-
-# Username
-user_layout, signup_user_box = create_input_group(
-    "Username", 
-    "Choose a username"
-)
-signup_layout.addLayout(user_layout)
-
-# Password
-pass_layout, signup_pass_box = create_input_group(
-    "Password", 
-    "Create a strong password",
-    is_password=True
-)
-signup_layout.addLayout(pass_layout)
-
-# Role and Area in a grid
-grid_layout = QHBoxLayout()
-grid_layout.setSpacing(20)
-
-# Role
-role_v = QVBoxLayout()
-role_v.setSpacing(12)
-role_lbl = QLabel("Role")
-role_lbl.setFont(QFont("Segoe UI", 16, QFont.Medium))
-signup_role_combo = QComboBox()
-signup_role_combo.addItems(["Passenger", "Driver"])
-signup_role_combo.setMinimumHeight(50)
-signup_role_combo.setFont(QFont("Segoe UI", 15))
-role_v.addWidget(role_lbl)
-role_v.addWidget(signup_role_combo)
-grid_layout.addLayout(role_v, stretch=1)
-
-# Area
-area_v = QVBoxLayout()
-area_v.setSpacing(12)
-area_lbl = QLabel("Area")
-area_lbl.setFont(QFont("Segoe UI", 16, QFont.Medium))
-signup_area_combo = QComboBox()
-signup_area_combo.addItems([
-    "Beirut", "Dahyeh", "Haret Hreik", "Khaldeh", 
-    "Jbeil", "Baalbek", "Choueifat", "Baabda", 
-    "Mansourieh", "Nabatieh", "Tyre", "Tripoli", "Hermel"
-])
-signup_area_combo.setMinimumHeight(50)
-signup_area_combo.setFont(QFont("Segoe UI", 15))
-area_v.addWidget(area_lbl)
-area_v.addWidget(signup_area_combo)
-grid_layout.addLayout(area_v, stretch=1)
-
-signup_layout.addLayout(grid_layout)
-
-signup_layout.addSpacing(10)
-
-# Error label
-signup_error_lbl = QLabel("")
-signup_error_lbl.setObjectName("error")
-signup_error_lbl.hide()
-signup_layout.addWidget(signup_error_lbl)
-
-# Signup button
-def handle_signup():
-    pass  # Will implement later
-
-signup_btn = QPushButton("Create Account")
-signup_btn.clicked.connect(handle_signup)
-signup_btn.setMinimumHeight(55)
-signup_btn.setFont(QFont("Segoe UI", 16, QFont.Bold))
-signup_layout.addWidget(signup_btn)
-
-signup_main.addLayout(signup_layout)
-signup_main.addStretch()
-signup_content.setLayout(signup_main)
-signup_scroll.setWidget(signup_content)
-
-signup_tab_layout = QVBoxLayout()
-signup_tab_layout.setContentsMargins(0, 0, 0, 0)
-signup_tab_layout.addWidget(signup_scroll)
-signup_tab.setLayout(signup_tab_layout)
-
-# Add tabs
-tabs.addTab(login_tab, "Sign In")
-tabs.addTab(signup_tab, "Sign Up")
-
-# Main window layout
-main = QVBoxLayout()
-main.addWidget(tabs)
-main.setContentsMargins(50, 50, 50, 50)
-window.setLayout(main)
-
-window.show()
-sys.exit(app.exec_())
+if __name__ == '__main__':
+    main()
