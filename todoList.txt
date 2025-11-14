@@ -1,3 +1,2 @@
-get IP adress of user that I want to talk to p2p
 get weather for the region you're in rn
 Messaging system

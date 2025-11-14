@@ -69,4 +69,17 @@ def give_rides_using_filter(data):
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
     
-    
+
+def get_IP(data):
+    userID = data.get("userID")
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        cur.execute('SELECT userCurrentIP FROM IpInfos WHERE userID=?', (userID,))
+        ip_info = cur.fetchone()
+        conn.close()
+        if ip_info is None:
+            return {"status": "404", "message": "IP information not found"}
+        return {"status": "200", "message": "IP information retrieved successfully", "data": {"userCurrentIP": ip_info[0]}}
+    except sqlite3.Error as e:
+        return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
