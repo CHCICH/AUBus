@@ -18,23 +18,16 @@ server.listen()
 def handle_client(client_socket):
     try:
         while True:
-            try:
-                conn = sqlite3.connect('aubus.db')
-                cur = conn.cursor()
-                cur.execute("INSERT INTO IpInfos (userID, userCurrentIP) VALUES (?, ?) ON CONFLICT(userID) DO UPDATE SET userCurrentIP=excluded.userCurrentIP", (0, client_socket.getpeername()[0]))
-                conn.close()
-            except sqlite3.Error as e:
-                error_response = {"status": "500", "message": "Database connection error"}
-                client_socket.send(json.dumps(error_response).encode('utf-8'))
             request = client_socket.recv(4096).decode('utf-8')
+            
             if not request:
                 break
             data = json.loads(request)
             action = data.get("action")
             if action == "login":
-                response = handle_login(data)
+                response = handle_login(data,client_socket)
             elif action == "sign_up":
-                response = handle_sign_up(data)
+                response = handle_sign_up(data,client_socket)
             elif action == "update_personal_info":
                 response = personal_info_manager(data)
             elif action == "ride_filter":
@@ -48,10 +41,17 @@ def handle_client(client_socket):
                     client_socket.send(json.dumps(response).encode('utf-8'))
                     conn = sqlite3.connect('aubus.db')
                     cur = conn.cursor()
-                    cur.execute("DELETE FROM IpInfos WHERE userCurrentIP=?", (client_socket.getpeername()[0],))
-                    conn.close()
-                    response = {"status": "200", "message": "Connection closed"}
-                    break
+                    cur.execute("SELCECT * FROM IpInfos WHERE userCurrentIP=?", (client_socket.getpeername()[0],))
+                    userValidity = cur.fetchone()
+                    if not userValidity:
+                        response = {"status": "200", "message": "Connection closed"}
+                        client_socket.send(json.dumps(response).encode('utf-8'))
+                        break
+                    else:
+                        cur.execute("DELETE FROM IpInfos WHERE userCurrentIP=?", (client_socket.getpeername()[0],))
+                        conn.close()
+                        response = {"status": "200", "message": "Connection closed"}
+                        break
                 except sqlite3.Error as e:
                     response = {"status": "500", "message": "Database connection error failed to disconnect properly please try again"}
             else:

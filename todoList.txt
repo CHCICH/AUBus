@@ -1,4 +1,5 @@
 Messaging system
+
 Request you should insert in the db a new request type in its table and you also need to look at the db_schema to understand how to query
 
 

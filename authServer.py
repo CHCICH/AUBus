@@ -16,7 +16,7 @@ def emaiIsCorrect(email):
 def generate_ID(username):
     return int(time.time())
 
-def handle_login(data):
+def handle_login(data, client_socket):
     username = data.get("userName")
     password = data.get("password")
     try:
@@ -28,12 +28,20 @@ def handle_login(data):
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
     if user:
+        try:
+            conn = sqlite3.connect('aubus.db')
+            cur = conn.cursor()
+            cur.execute("INSERT INTO IpInfos (userID, userCurrentIP) VALUES (?, ?) ON CONFLICT(userID) DO UPDATE SET userCurrentIP=excluded.userCurrentIP", (0, client_socket.getpeername()[0]))
+            conn.close()
+        except sqlite3.Error as e:
+            error_response = {"status": "500", "message": "Database connection error"}
+            client_socket.send(json.dumps(error_response).encode('utf-8'))
         return {"status": "200", "message": "Authenticated", "email": user[3]}
     else:
         return {"status": "401", "message": "Invalid credentials please try again and check your password or username"}
 
 
-def handle_sign_up(data):
+def handle_sign_up(data, client_socket):
     username = data.get("userName")
     password = data.get("password")
     email = data.get("email")
@@ -55,6 +63,14 @@ def handle_sign_up(data):
         cur.execute('INSERT INTO "Zone" (zoneID, zoneName, UserID) VALUES (?, ?, ?)', (generate_ID(zone), zone, int(userID)))
         conn.commit()
         conn.close()
+        try:
+            conn = sqlite3.connect('aubus.db')
+            cur = conn.cursor()
+            cur.execute("INSERT INTO IpInfos (userID, userCurrentIP) VALUES (?, ?) ON CONFLICT(userID) DO UPDATE SET userCurrentIP=excluded.userCurrentIP", (0, client_socket.getpeername()[0]))
+            conn.close()
+        except sqlite3.Error as e:
+            error_response = {"status": "500", "message": "Database connection error"}
+            client_socket.send(json.dumps(error_response).encode('utf-8'))
         return {"status": "201", "message": "User created successfully", "data":{"username": username, "email": email, "isDriver": isDriver, "aubID": aubID, "userID": userID}}
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
