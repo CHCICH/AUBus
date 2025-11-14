@@ -1,13 +1,16 @@
 from PyQt5.QtWidgets import *
 from PyQt5.QtGui import QFont
 from PyQt5.QtCore import Qt
-from authServer import authenticate
 import json
 import sys
 
+
+def authenticate():
+    pass
+
 app = QApplication(sys.argv)
 window = QWidget()
-window.setFixedSize(700, 700)
+# window.setFixedSize(700, 700)
 window.setWindowTitle("Login & Sign Up")
 
 window.setStyleSheet("""

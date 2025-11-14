@@ -39,6 +39,7 @@ def handle_sign_up(data):
     email = data.get("email")
     isDriver = data.get("isDriver", False)
     aubID = data.get("aubID", None)
+    zone = data.get("zone", None)
     try:
         conn = sqlite3.connect('aubus.db')
         cur = conn.cursor()
@@ -51,21 +52,9 @@ def handle_sign_up(data):
             return {"status": "400", "message": "Email is not valid please provide a valid email"}
         userID = generate_ID(username)
         cur.execute('INSERT INTO "user" (username, password, email, isDriver, aubID, userID) VALUES (?, ?, ?, ?, ?, ?)', (username, password, email, bool(isDriver), int(aubID), int(userID)))
+        cur.execute('INSERT INTO "Zone" (zoneID, zoneName, UserID) VALUES (?, ?, ?)', (generate_ID(zone), zone, int(userID)))
         conn.commit()
         conn.close()
         return {"status": "201", "message": "User created successfully", "data":{"username": username, "email": email, "isDriver": isDriver, "aubID": aubID, "userID": userID}}
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
-
-def authenticate(data_string):
-    try:
-        data = json.loads(data_string)
-    except json.JSONDecodeError:
-        return {"status": "400", "message": "Invalid JSON format"}
-    code_req = data.get("type_of_connection")
-    if code_req == "login":
-        return handle_login(data)
-    elif code_req == "signUp":
-        return handle_sign_up(data)
-    else:
-        return {"status": "400", "message": "Invalid type_of_connection value"}

@@ -13,8 +13,12 @@ def personal_info_manager(data):
         return add_ride(data)
     elif req_code == "remove_ride":
         return remove_ride(data)
-    elif req_code == "remove_schedule":
-        return remove_schedule(data)
+    elif req_code == "give_all_rides":
+        return give_all_rides(data)
+    elif req_code == "give_user_personal_informations":
+        return give_user_personal_informations(data)
+    elif req_code == "get_rating":
+        return get_rating(data)
     else:
         return {"status": "400", "message": "Invalid request type"}
 
@@ -104,14 +108,68 @@ def remove_ride(data):
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
     
-def remove_schedule(data):
-    schedule_id = data.get("scheduleID")
+def give_all_rides(data):
+    userID = data.get("userID")
     try:
         conn = sqlite3.connect('aubus.db')
         cur = conn.cursor()
-        cur.execute('DELETE FROM schedule WHERE scheduleID=?', (schedule_id,))
-        conn.commit()
+        cur.execute('SELECT * FROM Ride WHERE ownerID=?', (userID,))
+        rides = cur.fetchall()
         conn.close()
-        return {"status": "200", "message": "Schedule removed successfully"}
+        rides_list = []
+        for ride in rides:
+            rides_list.append({
+                "rideID": ride[0],
+                "ownerID": ride[1],
+                "carId": ride[2],
+                "sourceID": ride[3],
+                "destinationID": ride[4],
+                "startTime": ride[5],
+                "endTime": ride[6],
+                "scheduleID": ride[7]
+            })
+        return {"status": "200", "message": "Rides retrieved successfully", "data": rides_list}
+    except sqlite3.Error as e:
+        return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
+
+def give_user_personal_informations(data):
+    userID  = data.get("userID")
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        cur.execute('SELECT username, email, isDriver, aubID FROM "user" WHERE userID=?', (userID,))
+        user = cur.fetchone()
+        conn.close()
+        if user is None:
+            return {"status": "404", "message": "User not found"}
+        user_info = {
+            "username": user[0],
+            "email": user[1],
+            "isDriver": bool(user[2]),
+            "aubID": user[3]
+        }
+        return {"status": "200", "message": "User information retrieved successfully", "data": user_info}
+    except sqlite3.Error as e:
+        return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
+
+def get_rating(data):
+    userID = data.get("userID")
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        cur.execute('SELECT score, comment FROM Rating WHERE rateeID=?', (userID,))
+        ratings = cur.fetchall()
+        conn.close()
+        ratings_list = []
+        average_score = 0
+        for rating in ratings:
+            average_score += rating[0]
+            ratings_list.append({
+                "score": rating[0],
+                "comment": rating[1]
+            })
+        if ratings:
+            average_score /= len(ratings)
+        return {"status": "200", "message": "Ratings retrieved successfully", "data": ratings_list, "average_score": average_score}
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}

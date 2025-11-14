@@ -14,5 +14,5 @@ def send_request(request_data):
     response = client.recv(4096).decode('utf-8')
     return json.loads(response)
 
-print(send_request({"action": "sign_up", "userName": "testuser", "password": "testpass","email":"aaa12@mail.aub.edu","isDriver":True,"aubID":"123456"}))
+print(send_request({"action": "sign_up", "userName": "testuser", "password": "testpass","email":"aaa12@mail.aub.edu","isDriver":True,"aubID":"123456","zone":"Beirut"}))
 print(send_request({"action": "login", "userName": "testuser", "password": "testpass"}))

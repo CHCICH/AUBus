@@ -15,7 +15,7 @@ Supported gateway actions (quick)
 
 - Sign up
   - action: "sign_up"
-  - payload: { "action": "sign_up", "userName": "<string>", "password": "<string>", "email": "<string>", "isDriver": <bool>, "aubID": <string|null> }
+  - payload: { "action": "sign_up", "userName": "<string>", "password": "<string>", "email": "<string>", "isDriver": <bool>, "aubID": <string|null> , zone:"<string>"}
   - success: { "status": "201", "message": "User created successfully", "data": { ... } }
   - possible failures: duplicate user/email ("400"), invalid email ("400"), service/DB error ("400").
 

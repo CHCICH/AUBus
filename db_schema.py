@@ -16,7 +16,16 @@ CREATE TABLE IF NOT EXISTS "user" (
     isDriver   INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS Car (
+CREATE TABLE IF NOT EXISTS "Zone" (
+    zoneID   TEXT PRIMARY KEY,
+    zoneX  FLOAT,
+    zoneY  FLOAT,
+    zoneName TEXT,
+    UserID    INTEGER NOT NULL,
+    FOREIGN KEY(UserID) REFERENCES "user"(userID) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS "Car" (
     carId    TEXT PRIMARY KEY,
     cartype  TEXT,
     carPlate TEXT,
@@ -35,13 +44,15 @@ CREATE TABLE IF NOT EXISTS Ride (
     rideID     TEXT PRIMARY KEY,
     ownerID    INTEGER NOT NULL,
     carId      TEXT,
-    source     TEXT,
-    destination TEXT,
-    startTime  DATE,
-    endTime    DATE,
+    sourceID     TEXT,
+    destinationID TEXT,
+    startTime  INTEGER,
+    endTime    INTEGER,
     scheduleID TEXT,
     FOREIGN KEY(ownerID) REFERENCES "user"(userID) ON DELETE CASCADE,
     FOREIGN KEY(carId) REFERENCES Car(carId) ON DELETE SET NULL,
+    FOREIGN KEY(sourceID) REFERENCES "Zone"(zoneID) ON DELETE SET NULL,
+    FOREIGN KEY(destinationID) REFERENCES "Zone"(zoneID) ON DELETE SET NULL,
     FOREIGN KEY(scheduleID) REFERENCES schedule(scheduleID) ON DELETE SET NULL
 );
 
@@ -58,8 +69,20 @@ CREATE TABLE IF NOT EXISTS Request (
     riderID     INTEGER NOT NULL,
     rideID      TEXT NOT NULL,
     status      TEXT,
-    requestTime DATE,
+    requestTime INTEGER,
     FOREIGN KEY(riderID) REFERENCES "user"(userID) ON DELETE CASCADE,
+    FOREIGN KEY(rideID) REFERENCES Ride(rideID) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS Rating (
+    ratingID    TEXT PRIMARY KEY,
+    raterID     INTEGER NOT NULL,
+    rateeID     INTEGER NOT NULL,
+    rideID      TEXT NOT NULL,
+    score       INTEGER NOT NULL,
+    comment     TEXT,
+    FOREIGN KEY(raterID) REFERENCES "user"(userID) ON DELETE CASCADE,
+    FOREIGN KEY(rateeID) REFERENCES "user"(userID) ON DELETE CASCADE,
     FOREIGN KEY(rideID) REFERENCES Ride(rideID) ON DELETE CASCADE
 );
 
