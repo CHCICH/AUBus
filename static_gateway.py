@@ -10,7 +10,7 @@ from weather import get_weather_info
 
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind((socket.gethostname(),9999))
+server.bind(("0.0.0.0",9999))
 print("Server started on port 9999 on " + socket.gethostbyname(socket.gethostname()))
 
 server.listen()
