@@ -4,6 +4,7 @@ import time
 import json
 from authServer import handle_login, handle_sign_up
 from update_personal_info import personal_info_manager
+from rideManagement import give_rides_using_filter
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind((socket.gethostname(),9999))
@@ -25,6 +26,8 @@ def handle_client(client_socket):
                 response = handle_sign_up(data)
             elif action == "update_personal_info":
                 response = personal_info_manager(data)
+            elif action == "ride_filter":
+                response = give_rides_using_filter(data)
             elif action == "quit":
                 response = {"status": "200", "message": "Connection closed"}
                 client_socket.send(json.dumps(response).encode('utf-8'))
