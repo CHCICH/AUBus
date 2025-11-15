@@ -810,7 +810,7 @@ class AUBusUltimateGUI(QMainWindow):
         }
         
         response = send_request_to_gateway(payload)
-        
+        print(response)
         if str(response.get("status")) in ("200", "201"):
             # Get full user info
             user_id = response.get("userID")
@@ -862,6 +862,7 @@ class AUBusUltimateGUI(QMainWindow):
             QMessageBox.information(self, "Success", f"Welcome, {username}!")
             
         else:
+            print(response)
             QMessageBox.warning(self, "Login Failed", 
                               response.get("message", "Invalid credentials"))
     

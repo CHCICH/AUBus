@@ -58,6 +58,7 @@ def handle_client(client_socket):
                 response = {"status": "400", "message": "Invalid action"}
             client_socket.send(json.dumps(response).encode('utf-8'))
     except Exception as e:
+        print(str(e))
         error_response = {"status": "500", "message": f"Server error: {str(e)}"}
         client_socket.send(json.dumps(error_response).encode('utf-8'))
 
