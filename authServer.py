@@ -24,6 +24,8 @@ def handle_login(data, client_socket):
         cur = conn.cursor()
         cur.execute('SELECT * FROM "user" WHERE username=? AND password=?', (username, password))
         user = cur.fetchone()
+        print(user)
+        print(user[3])
         conn.close()
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
@@ -36,7 +38,13 @@ def handle_login(data, client_socket):
         except sqlite3.Error as e:
             error_response = {"status": "500", "message": "Database connection error"}
             client_socket.send(json.dumps(error_response).encode('utf-8'))
-        return {"status": "200", "message": "Authenticated", "data": {"username": username, "email": user[3], "isDriver": user[4], "aubID": user[5], "userID": user[6]}}
+        return {"status": "200", "message": "Authenticated", "data": {
+            "userID": user[0],
+            "username": user[1],
+            "email": user[2],
+            "isDriver": bool(user[5]),
+            "aubID": user[4]
+        }}
     else:
         return {"status": "401", "message": "Invalid credentials please try again and check your password or username"}
 
