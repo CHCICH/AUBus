@@ -31,7 +31,18 @@ import folium
 # Configuration
 GATEWAY_HOST = socket.gethostname()  # change to server IP if your gateway is remote
 GATEWAY_PORT = 9999
-GOOGLE_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY')  # must be set for Google Maps features
+def get_GGM_api_key():
+    try:
+        with open('.env', 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                if line.startswith('API_MAPS_KEY='):
+                    return line.strip().split('=')[1]
+    except FileNotFoundError:
+        return None
+    return None
+
+GOOGLE_API_KEY  = get_GGM_api_key()
 
 # --- Networking helper (simple blocking) ---
 import socket as _socket
