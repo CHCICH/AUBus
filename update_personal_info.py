@@ -19,6 +19,18 @@ def personal_info_manager(data):
         return give_user_personal_informations(data)
     elif req_code == "get_rating":
         return get_rating(data)
+    elif req_code == "update_zone":
+        return update_zone(data)
+    elif req_code == "get_zone":
+        return get_zone(data)
+    elif req_code == "get_cars":
+        return get_cars(data)
+    elif req_code == "add_car":
+        return add_car(data)
+    elif req_code == "update_car":  
+        return update_car(data)
+    elif req_code == "remove_car": 
+        return remove_car(data)
     else:
         return {"status": "400", "message": "Invalid request type"}
 
@@ -40,21 +52,31 @@ def handle_edit_role(data):
 def handle_edit_name(data):
     userID = data.get("userID")
     new_name = data.get("new_name")
+    
+    if not userID or not new_name:
+        return {"status": "400", "message": "UserID and new_name are required"}
+    
     try:
         conn = sqlite3.connect('aubus.db')
         cur = conn.cursor()
-        cur.execute('SELECT * FROM "user" WHERE username=?', (new_name,))
+        
+        # Check if username already exists (excluding current user)
+        cur.execute('SELECT userID FROM "user" WHERE username=? AND userID!=?', (new_name, userID))
         existing_user = cur.fetchone()
+        
         if existing_user:
             conn.close()
             return {"status": "400", "message": "Username already exists"}
+        
+        # Update username
         cur.execute('UPDATE "user" SET username=? WHERE userID=?', (new_name, userID))
         conn.commit()
         conn.close()
+        
         return {"status": "200", "message": "Name updated successfully"}
-    except sqlite3.Error as e:
-        return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
     
+    except sqlite3.Error as e:
+        return {"status": "400", "message": f"Database error: {str(e)}"}
 
 def checkIntersection(schedule, ride):
     schedule.sort()
@@ -212,3 +234,181 @@ def get_rating(data):
         return {"status": "200", "message": "Ratings retrieved successfully", "data": ratings_list, "average_score": average_score}
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
+    
+def update_zone(data):
+    """Update user's zone information"""
+    userID = data.get("userID")
+    zone = data.get("zone")
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        
+        # Check if zone exists for user
+        cur.execute('SELECT zoneID FROM Zone WHERE UserID=?', (userID,))
+        existing_zone = cur.fetchone()
+        
+        if existing_zone:
+            # Update existing zone
+            cur.execute('UPDATE Zone SET zoneName=? WHERE UserID=?', (zone, userID))
+        else:
+            # Create new zone entry
+            zone_id = f"zone_{int(time.time()*1000)}"
+            cur.execute('INSERT INTO Zone (zoneID, zoneName, UserID) VALUES (?, ?, ?)', 
+                       (zone_id, zone, userID))
+        
+        conn.commit()
+        conn.close()
+        return {"status": "200", "message": "Zone updated successfully"}
+    
+    except sqlite3.Error as e:
+        return {"status": "400", "message": f"Database error: {str(e)}"}
+
+def get_zone(data):
+    """Get user's current zone"""
+    userID = data.get("userID")
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        cur.execute('SELECT zoneName FROM Zone WHERE UserID=?', (userID,))
+        zone_result = cur.fetchone()
+        conn.close()
+        
+        if zone_result:
+            return {"status": "200", "data": {"zoneName": zone_result[0]}}
+        else:
+            return {"status": "404", "message": "Zone not found for user"}
+    
+    except sqlite3.Error as e:
+        return {"status": "400", "message": f"Database error: {str(e)}"}
+    
+def get_cars(data):
+    """Get driver's cars"""
+    userID = data.get("userID")
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        cur.execute('SELECT carId, cartype, carPlate, capacity FROM Car WHERE ownerID=?', (userID,))
+        cars = cur.fetchall()
+        conn.close()
+        
+        cars_list = []
+        for car in cars:
+            cars_list.append({
+                "carId": car[0],
+                "cartype": car[1],
+                "carPlate": car[2],
+                "capacity": car[3]
+            })
+        
+        return {"status": "200", "data": cars_list}
+    
+    except sqlite3.Error as e:
+        return {"status": "400", "message": f"Database error: {str(e)}"}
+
+def add_car(data):
+    """Add a new car for driver"""
+    userID = data.get("userID")
+    car_type = data.get("car_type")
+    car_plate = data.get("car_plate")
+    capacity = data.get("capacity")
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        
+        # Check if car plate already exists
+        cur.execute('SELECT carId FROM Car WHERE carPlate=?', (car_plate,))
+        existing_car = cur.fetchone()
+        
+        if existing_car:
+            conn.close()
+            return {"status": "400", "message": "Car with this plate already exists"}
+        
+        # Create new car
+        car_id = f"car_{int(time.time()*1000)}"
+        cur.execute('INSERT INTO Car (carId, cartype, carPlate, capacity, ownerID) VALUES (?, ?, ?, ?, ?)',
+                   (car_id, car_type, car_plate, capacity, userID))
+        
+        conn.commit()
+        conn.close()
+        return {"status": "200", "message": "Car added successfully", "carId": car_id}
+    
+    except sqlite3.Error as e:
+        return {"status": "400", "message": f"Database error: {str(e)}"}
+    
+def update_car(data):
+    """Update an existing car"""
+    userID = data.get("userID")
+    car_id = data.get("carId")
+    car_type = data.get("car_type")
+    car_plate = data.get("car_plate")
+    capacity = data.get("capacity")
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        
+        # Check if user owns this car
+        cur.execute('SELECT ownerID FROM Car WHERE carId=?', (car_id,))
+        car_owner = cur.fetchone()
+        
+        if not car_owner or car_owner[0] != userID:
+            conn.close()
+            return {"status": "403", "message": "You don't own this car"}
+        
+        # Check if new plate already exists (excluding current car)
+        cur.execute('SELECT carId FROM Car WHERE carPlate=? AND carId!=?', (car_plate, car_id))
+        existing_car = cur.fetchone()
+        
+        if existing_car:
+            conn.close()
+            return {"status": "400", "message": "Car with this plate already exists"}
+        
+        # Update car
+        cur.execute('UPDATE Car SET cartype=?, carPlate=?, capacity=? WHERE carId=?', 
+                   (car_type, car_plate, capacity, car_id))
+        
+        conn.commit()
+        conn.close()
+        return {"status": "200", "message": "Car updated successfully"}
+    
+    except sqlite3.Error as e:
+        return {"status": "400", "message": f"Database error: {str(e)}"}
+
+def remove_car(data):
+    """Remove a car"""
+    userID = data.get("userID")
+    car_id = data.get("carId")
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        
+        # Check if user owns this car
+        cur.execute('SELECT ownerID FROM Car WHERE carId=?', (car_id,))
+        car_owner = cur.fetchone()
+        
+        if not car_owner or car_owner[0] != userID:
+            conn.close()
+            return {"status": "403", "message": "You don't own this car"}
+        
+        # Check if car is used in any rides
+        cur.execute('SELECT rideID FROM Ride WHERE carId=?', (car_id,))
+        active_rides = cur.fetchall()
+        
+        if active_rides:
+            conn.close()
+            return {"status": "400", "message": "Cannot remove car that has active rides"}
+        
+        # Remove car
+        cur.execute('DELETE FROM Car WHERE carId=?', (car_id,))
+        
+        conn.commit()
+        conn.close()
+        return {"status": "200", "message": "Car removed successfully"}
+    
+    except sqlite3.Error as e:
+        return {"status": "400", "message": f"Database error: {str(e)}"}
