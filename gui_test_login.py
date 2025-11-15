@@ -3,7 +3,7 @@ AUBus Ultimate — Enhanced PyQt5 GUI combining best features
 with robust Google Maps, real-time updates, and comprehensive ride management.
 
 Requirements:
-    pip install PyQt5 PyQtWebEngine requests
+    pip install PyQt5 PyQtWebEngine requests folium
 
 Environment:
     Set GOOGLE_MAPS_API_KEY for Google Maps features
@@ -17,6 +17,7 @@ import sys
 import json
 import socket
 import tempfile
+import folium
 import threading
 import time
 from datetime import datetime
@@ -196,15 +197,31 @@ class AUBusUltimateGUI(QMainWindow):
         
         # Bottom info bar
         bottom_bar = QFrame()
-        bottom_bar.setMaximumHeight(100)
+        bottom_bar.setMaximumHeight(140)
         bottom_layout = QHBoxLayout(bottom_bar)
         
-        # Coordinates display
+        # Coordinates display with preset locations
         coord_group = QGroupBox("Selected Location")
         coord_layout = QVBoxLayout()
         self.coord_label = QLabel("Click map to select")
         self.coord_label.setWordWrap(True)
         coord_layout.addWidget(self.coord_label)
+        
+        # Add preset location buttons
+        preset_layout = QHBoxLayout()
+        preset_aub_btn = QPushButton("📍 AUB")
+        preset_aub_btn.setMaximumWidth(100)
+        preset_aub_btn.clicked.connect(lambda: self.set_preset_location(33.9006, 35.4812, "AUB"))
+        
+        preset_hamra_btn = QPushButton("📍 Hamra")
+        preset_hamra_btn.setMaximumWidth(100)
+        preset_hamra_btn.clicked.connect(lambda: self.set_preset_location(33.8958, 35.4787, "Hamra"))
+        
+        preset_layout.addWidget(preset_aub_btn)
+        preset_layout.addWidget(preset_hamra_btn)
+        preset_layout.addStretch()
+        coord_layout.addLayout(preset_layout)
+        
         coord_group.setLayout(coord_layout)
         bottom_layout.addWidget(coord_group)
         
@@ -472,7 +489,7 @@ class AUBusUltimateGUI(QMainWindow):
     # MAP INITIALIZATION
     # ========================================================================
     def init_map(self):
-        """Initialize Google Maps or fallback"""
+        """Initialize Google Maps or fallback to Folium"""
         if GOOGLE_API_KEY:
             html = self.build_google_map_html()
             channel = QWebChannel()
@@ -481,22 +498,48 @@ class AUBusUltimateGUI(QMainWindow):
             self.map_view.setHtml(html, QUrl(""))
             self.status_bar.showMessage("Map: Google Maps initialized ✅")
         else:
-            # Simple fallback HTML
-            html = """
-            <!DOCTYPE html>
-            <html>
-            <head><style>body{margin:0;padding:20px;font-family:Arial;background:#e3f2fd;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;}</style></head>
-            <body>
-            <div>
-            <h2>🗺 Map Unavailable</h2>
-            <p>Google Maps API key not set.<br>Set GOOGLE_MAPS_API_KEY environment variable.</p>
-            <p style="color:#666;font-size:12px;">The application will still work, but map features will be limited.</p>
-            </div>
-            </body>
-            </html>
-            """
-            self.map_view.setHtml(html)
-            self.status_bar.showMessage("Map: API key missing ⚠️")
+            # Folium fallback
+            try:
+                self.status_bar.showMessage("Map: Google API key missing — using local folium fallback")
+                
+                # AUB coordinates
+                aub_lat, aub_lng = 33.9006, 35.4812
+                
+                m = folium.Map(location=[aub_lat, aub_lng], zoom_start=13)
+                folium.Marker([aub_lat, aub_lng], tooltip='AUB').add_to(m)
+                
+                # You can add click functionality too
+                m.add_child(folium.LatLngPopup())
+                
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+                m.save(tmp.name)
+                self.map_view.load(QUrl.fromLocalFile(tmp.name))
+                
+                # Automatically set AUB coordinates and fetch weather
+                self.map_bridge.last_lat = aub_lat
+                self.map_bridge.last_lng = aub_lng
+                self.coord_label.setText(f"📍 {aub_lat:.6f}, {aub_lng:.6f} (AUB)")
+                
+                # Auto-fetch weather for AUB
+                self.refresh_weather()
+                
+            except ImportError:
+                # If folium is also not available, show simple HTML
+                html = """
+                <!DOCTYPE html>
+                <html>
+                <head><style>body{margin:0;padding:20px;font-family:Arial;background:#e3f2fd;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;}</style></head>
+                <body>
+                <div>
+                <h2>🗺 Map Unavailable</h2>
+                <p>Google Maps API key not set and Folium not installed.<br>Set GOOGLE_MAPS_API_KEY environment variable or install folium.</p>
+                <p style="color:#666;font-size:12px;">pip install folium</p>
+                </div>
+                </body>
+                </html>
+                """
+                self.map_view.setHtml(html)
+                self.status_bar.showMessage("Map: API key missing and folium not available ⚠️")   
     
     def build_google_map_html(self):
         """Build Google Maps HTML with all features"""
@@ -692,6 +735,49 @@ class AUBusUltimateGUI(QMainWindow):
                 self.dev_console.parent().setChecked(True)
         except:
             pass
+    
+    # ========================================================================
+    # PRESET LOCATION HANDLERS
+    # ========================================================================
+    def set_preset_location(self, lat, lng, name):
+        """Set a preset location and fetch weather"""
+        self.map_bridge.last_lat = lat
+        self.map_bridge.last_lng = lng
+        self.coord_label.setText(f"📍 {lat:.6f}, {lng:.6f} ({name})")
+        self.weather_label.setText("Fetching weather...")
+        
+        # Auto-refresh weather
+        self.refresh_weather()
+        
+        # If using folium, update the map marker
+        if not GOOGLE_API_KEY:
+            self.update_folium_marker(lat, lng, name)
+        else:
+            # Update Google Maps marker
+            js = f"if(clickMarker) clickMarker.setPosition({{lat: {lat}, lng: {lng}}});"
+            self.map_view.page().runJavaScript(js)
+    
+    def update_folium_marker(self, lat, lng, name):
+        """Update folium map with new marker (requires map reload)"""
+        try:
+            m = folium.Map(location=[lat, lng], zoom_start=14)
+            folium.Marker([lat, lng], tooltip=name, 
+                         popup=f"{name}<br>{lat:.6f}, {lng:.6f}").add_to(m)
+            
+            # Add AUB marker if we're not already at AUB
+            if name != "AUB":
+                folium.Marker([33.9006, 35.4812], tooltip='AUB',
+                             icon=folium.Icon(color='blue')).add_to(m)
+            
+            # Add click popup
+            m.add_child(folium.LatLngPopup())
+            
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+            m.save(tmp.name)
+            self.map_view.load(QUrl.fromLocalFile(tmp.name))
+            self.status_bar.showMessage(f"Map updated to {name} 📍")
+        except Exception as e:
+            self.status_bar.showMessage(f"Could not update map: {e}")
     
     # ========================================================================
     # AUTHENTICATION
