@@ -24,8 +24,6 @@ def handle_login(data, client_socket):
         cur = conn.cursor()
         cur.execute('SELECT * FROM "user" WHERE username=? AND password=?', (username, password))
         user = cur.fetchone()
-        print(user)
-        print(user[3])
         conn.close()
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
@@ -69,6 +67,7 @@ def handle_sign_up(data, client_socket):
         userID = generate_ID(username)
         cur.execute('INSERT INTO "user" (username, password, email, isDriver, aubID, userID) VALUES (?, ?, ?, ?, ?, ?)', (username, password, email, bool(isDriver), int(aubID), int(userID)))
         cur.execute('INSERT INTO "Zone" (zoneID, zoneName, UserID) VALUES (?, ?, ?)', (generate_ID(zone), zone, int(userID)))
+        cur.execute('INSERT INTO "schedule" (scheduleID, userID) VALUES (?, ?)', (int(userID), int(userID)))
         cur.execute('SELECT * FROM "user" WHERE username=?', (username,))
         new_user = cur.fetchone()
         print(new_user)

@@ -76,25 +76,64 @@ def add_ride(data):
     endTime = data.get("endTime")
     scheduleID = data.get("scheduleID")
     rideID = str(int(time.time() * 17 * 1000)) + userID[:3] + str(int(time.time() * 11 * 1000))
+
     try:
         conn = sqlite3.connect('aubus.db')
         cur = conn.cursor()
-        cur.execute("SELECT startTime, endTime FROM schedule WHERE scheduleID=?", (scheduleID,))
-        existing_schedule = cur.fetchone()
-        if not existing_schedule:
-            conn.close()
-            return {"status": "400", "message": "Schedule does not exist"}
-        existing_schedule = list(existing_schedule)
-        if checkIntersection(existing_schedule, (startTime, endTime)):
-            conn.close()
-            return {"status": "400", "message": "Ride time conflicts with existing schedule"}
 
-        cur.execute('INSERT INTO Ride (rideID, ownerID, carId, source, destination, startTime, endTime, scheduleID) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', (rideID, userID, carId, source, destination, startTime, endTime, scheduleID))
+        cur.execute('SELECT * FROM "schedule" WHERE scheduleID=?', (scheduleID,))
+        schedule_row = cur.fetchone()
+        if not schedule_row:
+            return {"status": "400", "message": "Schedule does not exist"}
+        cur.execute('SELECT * FROM "Car" WHERE ownerID=?', (carId, userID))
+        car_row = cur.fetchone()
+        if not car_row:
+            return {"status": "400", "message": "Car does not belong to user"}
+        cur.execute('SELECT * FROM "ride" WHERE scheduleID=?', (scheduleID,))
+        ride_row = cur.fetchone()
+        if ride_row:
+            ride_data = list(ride_row)
+            if checkIntersection(ride_data, (startTime, endTime)):
+                return {"status": "400", "message": "Ride time conflicts with existing schedule"}
+        zone0 = str(source[0] + source[1])
+        zone1 = str(destination[0] + destination[1])
+        cur.execute('SELECT * FROM "Zone" WHERE zoneID=? AND userID=?', (zone0,userID))
+        source_row = cur.fetchone()
+        if not source_row:
+            cur.execute('INSERT INTO "Zone" (zoneID,zoneX,zoneY,zoneName, UserID) VALUES (?, ?, ?, ?, ?)', (zone0,float(source[0]),float(source[1]), "Zone " + zone0, userID))
+        cur.execute('SELECT * FROM "Zone" WHERE zoneID=?', (zone1,))
+        source_row = cur.fetchone()
+        if not source_row:
+            cur.execute('INSERT INTO "Zone" (zoneID,zoneX,zoneY,zoneName, UserID) VALUES (?, ?, ?, ?, ?)', (zone1,float(destination[0]),float(destination[1]), "Zone " + zone1, userID))
+        cur.execute(
+            'INSERT INTO "Ride" (rideID, ownerID, carId, sourceID, destinationID, startTime, endTime, scheduleID) '
+            'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            (rideID, userID, carId, zone0, zone1, startTime, endTime, scheduleID)
+        )
         conn.commit()
-        conn.close()
-        return {"status": "201", "message": "Ride added successfully", "data":{"rideID": rideID, "ownerID": userID, "carId": carId, "source": source, "destination": destination, "startTime": startTime, "endTime": endTime, "scheduleID": scheduleID}}
-    except sqlite3.Error as e:
-        return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
+        return {
+            "status": "201",
+            "message": "Ride added successfully",
+            "data": {
+                "rideID": rideID,
+                "ownerID": userID,
+                "carId": carId,
+                "source": source,
+                "destination": destination,
+                "startTime": startTime,
+                "endTime": endTime,
+                "scheduleID": scheduleID
+            }
+        }
+
+    except sqlite3.Error:
+        return {"status": "400", "message": "An unexpected error occurred: it seems that the service is down"}
+    
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 def remove_ride(data):
     ride_id = data.get("rideID")
