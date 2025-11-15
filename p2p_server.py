@@ -8,7 +8,7 @@ PORT = 10000
 
 clients_lock = threading.Lock()
 clients = {}       
-client_info = {}   
+client_info = {}
 waiting = {}      
 
 def send_json_raw(sock, obj):
