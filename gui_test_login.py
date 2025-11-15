@@ -35,7 +35,18 @@ from PyQt5.QtGui import QFont, QIcon
 # Configuration
 GATEWAY_HOST = socket.gethostname()
 GATEWAY_PORT = 9999
-GOOGLE_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
+def get_GGM_api_key():
+    try:
+        with open('.env', 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                if line.startswith('API_MAPS_KEY='):
+                    return line.strip().split('=')[1]
+    except FileNotFoundError:
+        return None
+    return None
+
+GOOGLE_API_KEY  = get_GGM_api_key()
 
 # ============================================================================
 # NETWORKING HELPER
