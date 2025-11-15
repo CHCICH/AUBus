@@ -91,6 +91,14 @@ CREATE TABLE IF NOT EXISTS IpInfos (
     userCurrentIP TEXT NOT NULL,
     FOREIGN KEY(userID) REFERENCES "user"(userID) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS MessageRequest (
+    userID     INTEGER PRIMARY KEY, 
+    DestinationID INTEGER,
+    FOREIGN KEY(userID) REFERENCES "user"(userID) ON DELETE CASCADE,
+    FOREIGN KEY(DestinationID) REFERENCES "user"(userID) ON DELETE CASCADE
+);
+
 """
 
 def create_schema(db_path: str = "aubus.db") -> None:
