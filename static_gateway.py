@@ -10,7 +10,7 @@ from weather import get_weather_info
 
 
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind(("127.0.0.1",9999))
+server.bind(("0.0.0.0",9999))
 print("Server started on port 9999 on " + socket.gethostbyname(socket.gethostname()))
 
 server.listen()
@@ -58,7 +58,6 @@ def handle_client(client_socket):
                 response = {"status": "400", "message": "Invalid action"}
             client_socket.send(json.dumps(response).encode('utf-8'))
     except Exception as e:
-        print(str(e))
         error_response = {"status": "500", "message": f"Server error: {str(e)}"}
         client_socket.send(json.dumps(error_response).encode('utf-8'))
 
