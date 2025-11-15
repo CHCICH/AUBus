@@ -810,17 +810,16 @@ class AUBusUltimateGUI(QMainWindow):
         }
         
         response = send_request_to_gateway(payload)
-        print(response)
+        data_login = response.get("data")
         if str(response.get("status")) in ("200", "201"):
             # Get full user info
-            user_id = response.get("userID")
+            user_id = data_login.get("userID")
             user_info_req = {
                 "action": "update_personal_info",
                 "type_of_connection": "give_user_personal_informations",
                 "userID": user_id
             }
             user_info = send_request_to_gateway(user_info_req)
-            
             is_driver = False
             if user_info.get("status") == "200":
                 data = user_info.get("data", {})
@@ -829,7 +828,7 @@ class AUBusUltimateGUI(QMainWindow):
             self.user = {
                 "userID": user_id,
                 "username": username,
-                "email": response.get("email"),
+                "email": data_login.get("email"),
                 "isDriver": is_driver
             }
             
@@ -862,7 +861,6 @@ class AUBusUltimateGUI(QMainWindow):
             QMessageBox.information(self, "Success", f"Welcome, {username}!")
             
         else:
-            print(response)
             QMessageBox.warning(self, "Login Failed", 
                               response.get("message", "Invalid credentials"))
     
@@ -889,9 +887,9 @@ class AUBusUltimateGUI(QMainWindow):
             "aubID": aub_id,
             "zone": zone
         }
-        
+        print(payload)
         response = send_request_to_gateway(payload)
-        
+        print(response)
         if str(response.get("status")) == "201":
             QMessageBox.information(self, "Success", 
                                   "Account created successfully! Please login.")
@@ -949,12 +947,14 @@ class AUBusUltimateGUI(QMainWindow):
             "destination": dest,
             "startTime": start,
             "endTime": end,
-            "scheduleID": None,
+            "scheduleID": "1",
             "pickup_lat": pickup_lat,
             "pickup_lng": pickup_lng
         }
         
         response = send_request_to_gateway(payload)
+        print(payload)
+        print(response)
         
         if str(response.get("status")) in ("200", "201"):
             QMessageBox.information(self, "Success", "Ride added successfully!")
