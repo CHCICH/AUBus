@@ -45,7 +45,7 @@ def handle_sign_up(data, client_socket):
     username = data.get("userName")
     password = data.get("password")
     email = data.get("email")
-    isDriver = data.get("isDriver", False)
+    isDriver = data.get("isDriver")
     aubID = data.get("aubID", None)
     zone = data.get("zone", None)
     try:
@@ -61,8 +61,12 @@ def handle_sign_up(data, client_socket):
         userID = generate_ID(username)
         cur.execute('INSERT INTO "user" (username, password, email, isDriver, aubID, userID) VALUES (?, ?, ?, ?, ?, ?)', (username, password, email, bool(isDriver), int(aubID), int(userID)))
         cur.execute('INSERT INTO "Zone" (zoneID, zoneName, UserID) VALUES (?, ?, ?)', (generate_ID(zone), zone, int(userID)))
+        cur.execute('SELECT * FROM "user" WHERE username=?', (username,))
+        new_user = cur.fetchone()
+        print(new_user)
         conn.commit()
         conn.close()
+        print("here")
         try:
             conn = sqlite3.connect('aubus.db')
             cur = conn.cursor()
