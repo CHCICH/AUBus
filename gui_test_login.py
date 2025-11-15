@@ -1150,9 +1150,30 @@ class AUBusUltimateGUI(QMainWindow):
             "pickup_lat": pickup_lat,
             "pickup_lng": pickup_lng
         }
-        
+
+        startTime = start.split(":")
+        endTime = end.split(":")
+        startTime = int(startTime[1]) + int(startTime[0]) * 60
+        endTime = int(endTime[1]) + int(endTime[0]) * 60
+
+        payload_static = {
+            "action": "update_personal_info",
+            "type_of_connection": "add_ride",
+            "userID": self.user["userID"],
+            "carId": car_id,
+            "source": (pickup_lat, pickup_lng) if direction == "to_aub" else (33.9006, 35.4812),
+            "destination": (33.9006, 35.4812) if direction == "to_aub" else (pickup_lat, pickup_lng),
+            "startTime": startTime,
+            "endTime": endTime,
+            "scheduleID": self.user["userID"],
+        }
+        print("here ",payload_static)
+        static_response = send_request_to_gateway(payload_static)
+        print("static ",static_response)
+
         print(f"[Driver] Sending to ride server: {payload}")
         response = send_request_to_ride_server(payload)
+
         print(f"[Driver] Response: {response}")
         
         if str(response.get("status")) in ("200", "201"):
