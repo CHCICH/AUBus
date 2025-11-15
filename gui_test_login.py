@@ -29,6 +29,8 @@ from PyQt5.QtGui import QFont, QIcon
 # Configuration
 GATEWAY_HOST = socket.gethostname()
 GATEWAY_PORT = 9999
+RIDE_SERVER_HOST = socket.gethostname()
+RIDE_SERVER_PORT = 9998
 
 def get_GGM_api_key():
     try:
@@ -60,6 +62,10 @@ def send_request_to_gateway(payload, host=GATEWAY_HOST, port=GATEWAY_PORT, timeo
         return {"status": "500", "message": "Invalid JSON response from server"}
     except Exception as e:
         return {"status": "500", "message": f"Connection error: {str(e)}"}
+
+def send_request_to_ride_server(payload, timeout=8):
+    """Send JSON request to ride management server (port 9998)"""
+    return send_request_to_gateway(payload, host=RIDE_SERVER_HOST, port=RIDE_SERVER_PORT, timeout=timeout)
 
 # ============================================================================
 # MAP BRIDGE (JavaScript ↔ Python communication)
@@ -462,13 +468,23 @@ class AUBusUltimateGUI(QMainWindow):
         
         self.gateway_host_input = QLineEdit(GATEWAY_HOST)
         self.gateway_port_input = QLineEdit(str(GATEWAY_PORT))
+        self.ride_server_host_input = QLineEdit(RIDE_SERVER_HOST)
+        self.ride_server_port_input = QLineEdit(str(RIDE_SERVER_PORT))
         
         conn_form.addRow("Gateway Host:", self.gateway_host_input)
         conn_form.addRow("Gateway Port:", self.gateway_port_input)
+        conn_form.addRow("Ride Server Host:", self.ride_server_host_input)
+        conn_form.addRow("Ride Server Port:", self.ride_server_port_input)
         
-        test_conn_btn = QPushButton("Test Connection")
-        test_conn_btn.clicked.connect(self.test_connection)
-        conn_form.addRow(test_conn_btn)
+        test_buttons = QHBoxLayout()
+        test_gateway_btn = QPushButton("Test Gateway")
+        test_gateway_btn.clicked.connect(self.test_gateway_connection)
+        test_ride_btn = QPushButton("Test Ride Server")
+        test_ride_btn.clicked.connect(self.test_ride_server_connection)
+        test_buttons.addWidget(test_gateway_btn)
+        test_buttons.addWidget(test_ride_btn)
+        conn_form.addRow(test_buttons)
+        
         conn_group.setLayout(conn_form)
         layout.addWidget(conn_group)
         
@@ -497,7 +513,11 @@ class AUBusUltimateGUI(QMainWindow):
             "• Interactive Google Maps integration\n"
             "• Weather information\n"
             "• Driver and passenger modes\n"
-            "• Secure authentication"
+            "• Secure authentication\n"
+            "• Dedicated ride management server\n\n"
+            "Servers:\n"
+            "• Port 9999: Authentication & User Management\n"
+            "• Port 9998: Ride Management"
         )
         about_text.setWordWrap(True)
         about_layout.addWidget(about_text)
@@ -1104,14 +1124,6 @@ class AUBusUltimateGUI(QMainWindow):
                               "Please enter a pickup area or use the map")
             return
         
-        # Determine source and destination based on direction
-        if direction == "to_aub":
-            source = area
-            dest = "AUB, Beirut"
-        else:  # from_aub
-            source = "AUB, Beirut"
-            dest = area
-        
         # Extract coordinates if area is in "lat,lng" format
         pickup_lat = None
         pickup_lng = None
@@ -1125,13 +1137,13 @@ class AUBusUltimateGUI(QMainWindow):
             except:
                 pass
         
+        # Send to ride management server (port 9998)
         payload = {
-            "action": "update_personal_info",
-            "type_of_connection": "add_ride",
+            "action": "add_ride",
             "userID": self.user["userID"],
             "carId": car_id,
-            "source": source,
-            "destination": dest,
+            "area": area,
+            "direction": direction,
             "startTime": start,
             "endTime": end,
             "scheduleID": "1",
@@ -1139,13 +1151,32 @@ class AUBusUltimateGUI(QMainWindow):
             "pickup_lng": pickup_lng
         }
         
-        response = send_request_to_gateway(payload)
+        print(f"[Driver] Sending to ride server: {payload}")
+        response = send_request_to_ride_server(payload)
+        print(f"[Driver] Response: {response}")
         
         if str(response.get("status")) in ("200", "201"):
+            ride_data = response.get("data", {})
+            ride_id = ride_data.get("rideID", "N/A")
+            
+            # Determine source and destination for display
+            if direction == "to_aub":
+                source = area
+                dest = "AUB, Beirut"
+            else:
+                source = "AUB, Beirut"
+                dest = area
+            
             QMessageBox.information(self, "Success", 
-                f"Ride added successfully!\n\nDirection: {direction}\nFrom: {source}\nTo: {dest}")
+                f"Ride added successfully!\n\n"
+                f"Ride ID: {ride_id}\n"
+                f"Direction: {direction}\n"
+                f"From: {source}\n"
+                f"To: {dest}\n"
+                f"Time: {start} - {end}")
+            
             self.driver_area.clear()
-            self.status_bar.showMessage("Ride added ✅")
+            self.status_bar.showMessage(f"Ride added ✅ (ID: {ride_id})")
         else:
             QMessageBox.warning(self, "Error", 
                               response.get("message", "Failed to add ride"))
@@ -1254,6 +1285,7 @@ class AUBusUltimateGUI(QMainWindow):
             QMessageBox.warning(self, "Input Error", "Please enter an area or use map")
             return
         
+        # Send to ride management server (port 9998)
         payload = {
             "action": "request_ride",
             "riderID": self.user["userID"],
@@ -1262,32 +1294,55 @@ class AUBusUltimateGUI(QMainWindow):
             "direction": direction
         }
         
-        response = send_request_to_gateway(payload)
+        print(f"[Passenger] Sending to ride server: {payload}")
+        response = send_request_to_ride_server(payload)
+        print(f"[Passenger] Response: {response}")
         
         if response.get("status") == "200":
-            candidates = response.get("candidates", [])
-            self.current_candidates = candidates
-            self.current_request_id = response.get("requestID")
+            data = response.get("data", {})
+            candidates = data.get("candidates", [])
+            gateway_candidates = data.get("gatewayCandidates", [])
+            
+            # Combine both sources of candidates
+            all_candidates = candidates + gateway_candidates
+            
+            # Remove duplicates based on rideID
+            seen_ride_ids = set()
+            unique_candidates = []
+            for candidate in all_candidates:
+                ride_id = candidate.get("rideID")
+                if ride_id and ride_id not in seen_ride_ids:
+                    seen_ride_ids.add(ride_id)
+                    unique_candidates.append(candidate)
+            
+            self.current_candidates = unique_candidates
+            self.current_request_id = data.get("requestID")
             
             self.drivers_list.clear()
             drivers_for_map = []
             
-            for idx, candidate in enumerate(candidates, 1):
-                driver = candidate.get("owner_username", "Unknown")
-                source = candidate.get("ride_source", "N/A")
-                dest = candidate.get("ride_destination", "N/A")
+            for idx, candidate in enumerate(unique_candidates, 1):
+                driver = candidate.get("driverUsername", "Unknown")
+                source = candidate.get("source", "N/A")
+                dest = candidate.get("destination", "N/A")
                 distance = candidate.get("distance_text", 
                           f"{candidate.get('distance_m', 0):.0f}m")
                 duration = candidate.get("duration_text", "N/A")
+                start_time = candidate.get("startTime", "N/A")
+                end_time = candidate.get("endTime", "N/A")
                 
                 item_text = (f"🚗 #{idx} {driver} | 📍 {source} → {dest} | "
-                           f"📏 {distance} | ⏱ {duration}")
+                           f"⏱ {start_time}-{end_time}")
+                
+                if distance != "N/A":
+                    item_text += f" | 📏 {distance}"
+                
                 item = QListWidgetItem(item_text)
                 item.setData(Qt.UserRole, candidate)
                 self.drivers_list.addItem(item)
                 
-                lat = candidate.get("ride_lat")
-                lng = candidate.get("ride_lng")
+                lat = candidate.get("pickup_lat") or candidate.get("ride_lat")
+                lng = candidate.get("pickup_lng") or candidate.get("ride_lng")
                 if lat and lng:
                     drivers_for_map.append({
                         "lat": lat,
@@ -1300,9 +1355,9 @@ class AUBusUltimateGUI(QMainWindow):
                 js = f"addDriverMarkers({json.dumps(drivers_for_map)});"
                 self.map_view.page().runJavaScript(js)
             
-            msg = f"Found {len(candidates)} available driver(s)!"
+            msg = f"Found {len(unique_candidates)} available driver(s)!"
             QMessageBox.information(self, "Success", msg)
-            self.status_bar.showMessage(f"{len(candidates)} drivers found ✅")
+            self.status_bar.showMessage(f"{len(unique_candidates)} drivers found ✅")
             
         else:
             QMessageBox.warning(self, "No Drivers", 
@@ -1413,8 +1468,8 @@ class AUBusUltimateGUI(QMainWindow):
         else:
             self.weather_label.setText(str(response))
     
-    def test_connection(self):
-        """Test connection to gateway"""
+    def test_gateway_connection(self):
+        """Test connection to gateway server"""
         try:
             host = self.gateway_host_input.text().strip()
             port = int(self.gateway_port_input.text().strip())
@@ -1424,13 +1479,38 @@ class AUBusUltimateGUI(QMainWindow):
             s.connect((host, port))
             s.close()
             
-            QMessageBox.information(self, "Connection Test", 
-                f"✅ Successfully connected to {host}:{port}")
+            QMessageBox.information(self, "Gateway Connection Test", 
+                f"✅ Successfully connected to Gateway\n{host}:{port}")
             self.status_bar.showMessage(f"Gateway connection OK ✅")
         except Exception as e:
-            QMessageBox.critical(self, "Connection Test Failed", 
+            QMessageBox.critical(self, "Gateway Connection Failed", 
                 f"❌ Could not connect to gateway:\n{str(e)}")
             self.status_bar.showMessage("Gateway connection failed ❌")
+    
+    def test_ride_server_connection(self):
+        """Test connection to ride management server"""
+        try:
+            host = self.ride_server_host_input.text().strip()
+            port = int(self.ride_server_port_input.text().strip())
+            
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(3)
+            s.connect((host, port))
+            s.close()
+            
+            QMessageBox.information(self, "Ride Server Connection Test", 
+                f"✅ Successfully connected to Ride Server\n{host}:{port}")
+            self.status_bar.showMessage(f"Ride server connection OK ✅")
+        except Exception as e:
+            QMessageBox.critical(self, "Ride Server Connection Failed", 
+                f"❌ Could not connect to ride server:\n{str(e)}\n\n"
+                f"Make sure ride_management_server.py is running!")
+            self.status_bar.showMessage("Ride server connection failed ❌")
+    
+    def test_connection(self):
+        """Test both connections (legacy function)"""
+        self.test_gateway_connection()
+        self.test_ride_server_connection()
     
     # ========================================================================
     # STYLING
