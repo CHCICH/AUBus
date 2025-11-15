@@ -81,8 +81,8 @@ def handle_edit_name(data):
 def checkIntersection(schedule, ride):
     schedule.sort()
     for ride_i in schedule:
-        ride_start = ride_i[0]
-        ride_end = ride_i[1]
+        ride_start = int(ride_i[0])
+        ride_end = int(ride_i[1])
         if ride_start <= ride[1] and ride_end >= ride[0]:
             return True
     return False
@@ -97,7 +97,7 @@ def add_ride(data):
     startTime = data.get("startTime")
     endTime = data.get("endTime")
     scheduleID = data.get("scheduleID")
-    rideID = str(int(time.time() * 17 * 1000)) + userID[:3] + str(int(time.time() * 11 * 1000))
+    rideID = str(int(time.time() * 17 * 1000))
 
     try:
         conn = sqlite3.connect('aubus.db')
@@ -107,15 +107,16 @@ def add_ride(data):
         schedule_row = cur.fetchone()
         if not schedule_row:
             return {"status": "400", "message": "Schedule does not exist"}
-        cur.execute('SELECT * FROM "Car" WHERE ownerID=?', (carId, userID))
+        cur.execute('SELECT * FROM "Car" WHERE ownerID=?', (userID,))
         car_row = cur.fetchone()
         if not car_row:
-            return {"status": "400", "message": "Car does not belong to user"}
+            return {"status": "400", "message": "user have no cars"}
         cur.execute('SELECT * FROM "ride" WHERE scheduleID=?', (scheduleID,))
-        ride_row = cur.fetchone()
+        ride_row = cur.fetchall()
+        ride_data = [(ride[5], ride[6]) for ride in ride_row]
         if ride_row:
-            ride_data = list(ride_row)
-            if checkIntersection(ride_data, (startTime, endTime)):
+            print(ride_data)
+            if checkIntersection(ride_data, (int(startTime), int(endTime))):
                 return {"status": "400", "message": "Ride time conflicts with existing schedule"}
         zone0 = str(source[0] + source[1])
         zone1 = str(destination[0] + destination[1])

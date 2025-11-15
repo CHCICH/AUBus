@@ -27,8 +27,8 @@ f = send_request({
             "carId": "1",
             "source": (33.888630, 35.495480),
             "destination": (33.888630, 35.495480),
-            "startTime": 10000,
-            "endTime": 100000,
+            "startTime": 9,
+            "endTime": 99,
             "scheduleID": "1763228265",
         })
 print(t)
