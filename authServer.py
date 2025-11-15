@@ -36,7 +36,7 @@ def handle_login(data, client_socket):
         except sqlite3.Error as e:
             error_response = {"status": "500", "message": "Database connection error"}
             client_socket.send(json.dumps(error_response).encode('utf-8'))
-        return {"status": "200", "message": "Authenticated", "email": user[3]}
+        return {"status": "200", "message": "Authenticated", "data": {"username": username, "email": user[3], "isDriver": user[4], "aubID": user[5], "userID": user[6]}}
     else:
         return {"status": "401", "message": "Invalid credentials please try again and check your password or username"}
 
