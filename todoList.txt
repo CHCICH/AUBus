@@ -5,3 +5,8 @@ Request you should insert in the db a new request type in its table and you also
 
 Accept Ride you should first check that its possible by query for the number of riders currently in the ride and then check the capacity 
 of the ride using the carID in the ride then you can check the cars's capacity  
+
+
+
+google maps-> return (latitude,longitude) coordinates
+user puts new ride-> dont give him destination and source.

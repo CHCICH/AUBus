@@ -1,16 +1,10 @@
 """
-AUBus Ultimate — Enhanced PyQt5 GUI combining best features
-with robust Google Maps, real-time updates, and comprehensive ride management.
-
-Requirements:
-    pip install PyQt5 PyQtWebEngine requests folium
-
-Environment:
-    Set GOOGLE_MAPS_API_KEY for Google Maps features
-    Ensure static_gateway.py is running on port 9999
-
-Run:
-    python aubus_ultimate_gui.py
+AUBus Ultimate — Fixed Google Maps Integration
+Key fixes:
+- Improved Qt WebChannel communication
+- Better coordinate handling
+- Auto-fill location fields
+- Fixed map click event propagation
 """
 import os
 import sys
@@ -28,13 +22,14 @@ from PyQt5.QtWidgets import (
     QSplitter, QFrame, QSpacerItem, QSizePolicy, QComboBox, QScrollArea
 )
 from PyQt5.QtCore import QObject, pyqtSlot, pyqtSignal, QUrl, Qt, QTime, QTimer
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEngineSettings
 from PyQt5.QtWebChannel import QWebChannel
 from PyQt5.QtGui import QFont, QIcon
 
 # Configuration
 GATEWAY_HOST = socket.gethostname()
 GATEWAY_PORT = 9999
+
 def get_GGM_api_key():
     try:
         with open('.env', 'r') as f:
@@ -46,7 +41,7 @@ def get_GGM_api_key():
         return None
     return None
 
-GOOGLE_API_KEY  = get_GGM_api_key()
+GOOGLE_API_KEY = get_GGM_api_key()
 
 # ============================================================================
 # NETWORKING HELPER
@@ -82,6 +77,12 @@ class MapBridge(QObject):
     @pyqtSlot(float, float)
     def reportCoordinates(self, lat, lng):
         """Called from JavaScript when user clicks map"""
+        print(f"\n{'='*60}")
+        print(f"[MapBridge] reportCoordinates() called!")
+        print(f"[MapBridge] Latitude: {lat}")
+        print(f"[MapBridge] Longitude: {lng}")
+        print(f"{'='*60}\n")
+        
         self.last_lat = float(lat)
         self.last_lng = float(lng)
         self.coordinatesChanged.emit(self.last_lat, self.last_lng)
@@ -89,6 +90,7 @@ class MapBridge(QObject):
     @pyqtSlot(str)
     def consoleLog(self, msg):
         """Forward JavaScript console messages to Python"""
+        print(f"[JS Console] {msg}")
         self.consoleMessage.emit(str(msg))
 
 # ============================================================================
@@ -101,7 +103,7 @@ class AUBusUltimateGUI(QMainWindow):
         self.setGeometry(100, 50, 1400, 900)
         
         # Session data
-        self.user = None  # {userID, username, email, isDriver}
+        self.user = None
         self.current_candidates = []
         self.current_request_id = None
         self.pending_requests = []
@@ -116,13 +118,13 @@ class AUBusUltimateGUI(QMainWindow):
         self.refresh_timer.timeout.connect(self.auto_refresh_requests)
         
         self.init_ui()
-        self.init_map()
+        # Delay map initialization to ensure UI is ready
+        QTimer.singleShot(500, self.init_map)
     
     def init_ui(self):
         """Initialize the user interface"""
         self.setStyleSheet(self.get_stylesheet())
         
-        # Central widget with splitter
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
@@ -208,7 +210,7 @@ class AUBusUltimateGUI(QMainWindow):
         
         # Bottom info bar
         bottom_bar = QFrame()
-        bottom_bar.setMaximumHeight(140)
+        bottom_bar.setMaximumHeight(250)
         bottom_layout = QHBoxLayout(bottom_bar)
         
         # Coordinates display with preset locations
@@ -217,6 +219,20 @@ class AUBusUltimateGUI(QMainWindow):
         self.coord_label = QLabel("Click map to select")
         self.coord_label.setWordWrap(True)
         coord_layout.addWidget(self.coord_label)
+        
+        # Add buttons to use coordinates
+        use_btn_layout = QHBoxLayout()
+        self.use_for_driver_btn = QPushButton("📝 Use for Driver Pickup")
+        self.use_for_driver_btn.clicked.connect(self.use_coords_for_driver)
+        self.use_for_driver_btn.setEnabled(False)
+        
+        self.use_for_passenger_btn = QPushButton("📝 Use for Passenger Area")
+        self.use_for_passenger_btn.clicked.connect(self.use_coords_for_passenger)
+        self.use_for_passenger_btn.setEnabled(False)
+        
+        use_btn_layout.addWidget(self.use_for_driver_btn)
+        use_btn_layout.addWidget(self.use_for_passenger_btn)
+        coord_layout.addLayout(use_btn_layout)
         
         # Add preset location buttons
         preset_layout = QHBoxLayout()
@@ -261,7 +277,6 @@ class AUBusUltimateGUI(QMainWindow):
         layout = QVBoxLayout(tab)
         layout.setSpacing(20)
         
-        # Title
         title = QLabel("Welcome to AUBus")
         title.setAlignment(Qt.AlignCenter)
         title.setStyleSheet("font-size: 18px; font-weight: bold; color: #0066cc;")
@@ -328,10 +343,12 @@ class AUBusUltimateGUI(QMainWindow):
         add_ride_group = QGroupBox("➕ Add New Ride")
         add_form = QFormLayout()
         
-        self.driver_source = QLineEdit()
-        self.driver_source.setPlaceholderText("e.g., Hamra, Beirut (or use map)")
-        self.driver_dest = QLineEdit()
-        self.driver_dest.setPlaceholderText("AUB, Beirut")
+        self.driver_area = QLineEdit()
+        self.driver_area.setPlaceholderText("Click 'Use for Driver Pickup' or click map to set location")
+        
+        self.driver_direction = QComboBox()
+        self.driver_direction.addItems(["to_aub", "from_aub"])
+        
         self.driver_start_time = QTimeEdit()
         self.driver_start_time.setDisplayFormat("HH:mm")
         self.driver_start_time.setTime(QTime(8, 0))
@@ -340,15 +357,12 @@ class AUBusUltimateGUI(QMainWindow):
         self.driver_end_time.setTime(QTime(16, 0))
         self.driver_car_id = QLineEdit()
         self.driver_car_id.setPlaceholderText("Optional")
-        self.driver_use_map_coords = QCheckBox("Use map coordinates for pickup")
-        self.driver_use_map_coords.setChecked(True)
         
-        add_form.addRow("Source:", self.driver_source)
-        add_form.addRow("Destination:", self.driver_dest)
+        add_form.addRow("Pickup Area:", self.driver_area)
+        add_form.addRow("Direction:", self.driver_direction)
         add_form.addRow("Start Time:", self.driver_start_time)
         add_form.addRow("End Time:", self.driver_end_time)
         add_form.addRow("Car ID:", self.driver_car_id)
-        add_form.addRow("", self.driver_use_map_coords)
         
         add_ride_btn = QPushButton("✅ Add Ride")
         add_ride_btn.clicked.connect(self.handle_add_ride)
@@ -393,19 +407,16 @@ class AUBusUltimateGUI(QMainWindow):
         request_form = QFormLayout()
         
         self.passenger_area = QLineEdit()
-        self.passenger_area.setPlaceholderText("e.g., Hamra, Beirut (or use map)")
+        self.passenger_area.setPlaceholderText("Click 'Use for Passenger Area' to fill from map")
         self.passenger_time = QTimeEdit()
         self.passenger_time.setDisplayFormat("HH:mm")
         self.passenger_time.setTime(QTime(8, 15))
         self.passenger_direction = QComboBox()
         self.passenger_direction.addItems(["to_aub", "from_aub"])
-        self.passenger_use_map = QCheckBox("Use map coordinates")
-        self.passenger_use_map.setChecked(False)
         
         request_form.addRow("Area:", self.passenger_area)
         request_form.addRow("Time:", self.passenger_time)
         request_form.addRow("Direction:", self.passenger_direction)
-        request_form.addRow("", self.passenger_use_map)
         
         request_btn = QPushButton("🔍 Find Drivers")
         request_btn.clicked.connect(self.handle_request_ride)
@@ -502,58 +513,72 @@ class AUBusUltimateGUI(QMainWindow):
     def init_map(self):
         """Initialize Google Maps or fallback to Folium"""
         if GOOGLE_API_KEY:
-            html = self.build_google_map_html()
-            channel = QWebChannel()
-            channel.registerObject('bridge', self.map_bridge)
-            self.map_view.page().setWebChannel(channel)
-            self.map_view.setHtml(html, QUrl(""))
-            self.status_bar.showMessage("Map: Google Maps initialized ✅")
+            # Enable web channel BEFORE anything else
+            from PyQt5.QtWebEngineWidgets import QWebEngineSettings
+            settings = self.map_view.settings()
+            settings.setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+            settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
+            
+            # Create and set up the channel
+            self.web_channel = QWebChannel(self.map_view.page())
+            self.web_channel.registerObject('bridge', self.map_bridge)
+            self.map_view.page().setWebChannel(self.web_channel)
+            
+            print("[Map] WebChannel created and registered")
+            print(f"[Map] Bridge object: {self.map_bridge}")
+            
+            # Load HTML after a delay
+            QTimer.singleShot(200, self._load_map_html)
         else:
-            # Folium fallback
-            try:
-                self.status_bar.showMessage("Map: Google API key missing — using local folium fallback")
-                
-                # AUB coordinates
-                aub_lat, aub_lng = 33.9006, 35.4812
-                
-                m = folium.Map(location=[aub_lat, aub_lng], zoom_start=13)
-                folium.Marker([aub_lat, aub_lng], tooltip='AUB').add_to(m)
-                
-                # You can add click functionality too
-                m.add_child(folium.LatLngPopup())
-                
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
-                m.save(tmp.name)
-                self.map_view.load(QUrl.fromLocalFile(tmp.name))
-                
-                # Automatically set AUB coordinates and fetch weather
-                self.map_bridge.last_lat = aub_lat
-                self.map_bridge.last_lng = aub_lng
-                self.coord_label.setText(f"📍 {aub_lat:.6f}, {aub_lng:.6f} (AUB)")
-                
-                # Auto-fetch weather for AUB
-                self.refresh_weather()
-                
-            except ImportError:
-                # If folium is also not available, show simple HTML
-                html = """
-                <!DOCTYPE html>
-                <html>
-                <head><style>body{margin:0;padding:20px;font-family:Arial;background:#e3f2fd;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;}</style></head>
-                <body>
-                <div>
-                <h2>🗺 Map Unavailable</h2>
-                <p>Google Maps API key not set and Folium not installed.<br>Set GOOGLE_MAPS_API_KEY environment variable or install folium.</p>
-                <p style="color:#666;font-size:12px;">pip install folium</p>
-                </div>
-                </body>
-                </html>
-                """
-                self.map_view.setHtml(html)
-                self.status_bar.showMessage("Map: API key missing and folium not available ⚠️")   
+            self.load_folium_fallback()
+    
+    def _load_map_html(self):
+        """Load map HTML after channel is ready"""
+        html = self.build_google_map_html()
+        base_url = QUrl("qrc:///")
+        self.map_view.setHtml(html, base_url)
+        self.status_bar.showMessage("Map: Google Maps loading...")
+        print("[Map] HTML loaded, waiting for JavaScript initialization...")
+    
+    def load_folium_fallback(self):
+        """Load folium fallback map"""
+        try:
+            self.status_bar.showMessage("Map: Google API key missing — using local folium fallback")
+            
+            aub_lat, aub_lng = 33.9006, 35.4812
+            
+            m = folium.Map(location=[aub_lat, aub_lng], zoom_start=13)
+            folium.Marker([aub_lat, aub_lng], tooltip='AUB').add_to(m)
+            m.add_child(folium.LatLngPopup())
+            
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+            m.save(tmp.name)
+            self.map_view.load(QUrl.fromLocalFile(tmp.name))
+            
+            self.map_bridge.last_lat = aub_lat
+            self.map_bridge.last_lng = aub_lng
+            self.coord_label.setText(f"📍 {aub_lat:.6f}, {aub_lng:.6f} (AUB)")
+            self.refresh_weather()
+            
+        except ImportError:
+            html = """
+            <!DOCTYPE html>
+            <html>
+            <head><style>body{margin:0;padding:20px;font-family:Arial;background:#e3f2fd;display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;}</style></head>
+            <body>
+            <div>
+            <h2>🗺 Map Unavailable</h2>
+            <p>Google Maps API key not set and Folium not installed.<br>Set GOOGLE_MAPS_API_KEY environment variable or install folium.</p>
+            <p style="color:#666;font-size:12px;">pip install folium</p>
+            </div>
+            </body>
+            </html>
+            """
+            self.map_view.setHtml(html)
+            self.status_bar.showMessage("Map: API key missing and folium not available ⚠️")
     
     def build_google_map_html(self):
-        """Build Google Maps HTML with all features"""
+        """Build Google Maps HTML with improved bridge communication"""
         return f"""
 <!DOCTYPE html>
 <html>
@@ -564,42 +589,91 @@ class AUBusUltimateGUI(QMainWindow):
   <script src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_API_KEY}&libraries=places"></script>
   <style>
     html, body, #map {{ height: 100%; margin: 0; padding: 0; }}
-    #error {{ position: absolute; z-index: 999; left: 10px; top: 10px; 
-             background: rgba(255,255,255,0.95); padding: 12px; 
-             border-radius: 8px; display: none; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-             max-width: 300px; }}
+    #status {{
+      position: absolute; z-index: 999; left: 10px; top: 10px;
+      background: rgba(255,255,255,0.95); padding: 8px 12px;
+      border-radius: 6px; font-size: 11px; font-family: monospace;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+    }}
+    .success {{ color: #27ae60; }}
+    .error {{ color: #e74c3c; }}
   </style>
 </head>
 <body>
   <div id="map"></div>
-  <div id="error">Map initialization failed. Check console.</div>
+  <div id="status">Initializing...</div>
 <script>
   let bridge = null;
   let map, clickMarker, markers = [], directionsService, directionsRenderer;
+  let bridgeReady = false;
+  let initAttempts = 0;
   
-  // Initialize Qt bridge
-  new QWebChannel(qt.webChannelTransport, function(channel) {{
-    bridge = channel.objects.bridge;
-  }});
+  // Status display helper
+  function setStatus(msg, isError = false) {{
+    const status = document.getElementById('status');
+    status.textContent = msg;
+    status.className = isError ? 'error' : 'success';
+    console.log('[MAP STATUS] ' + msg);
+    setTimeout(() => {{
+      if (!isError) status.style.display = 'none';
+    }}, 3000);
+  }}
   
-  // Console forwarding
-  (function() {{
-    const log = console.log, err = console.error, warn = console.warn;
-    console.log = function(...args) {{
-      try {{ if(bridge?.consoleLog) bridge.consoleLog(JSON.stringify({{type:'log',msg:args}})); }} catch(e) {{}}
-      log.apply(console, args);
-    }};
-    console.error = function(...args) {{
-      try {{ if(bridge?.consoleLog) bridge.consoleLog(JSON.stringify({{type:'error',msg:args}})); }} catch(e) {{}}
-      err.apply(console, args);
-    }};
-    console.warn = function(...args) {{
-      try {{ if(bridge?.consoleLog) bridge.consoleLog(JSON.stringify({{type:'warn',msg:args}})); }} catch(e) {{}}
-      warn.apply(console, args);
-    }};
-  }})();
+  // Initialize Qt WebChannel bridge with retry logic
+  function initBridge() {{
+    console.log('[BRIDGE] Attempting to initialize bridge...');
+    initAttempts++;
+    
+    try {{
+      if (typeof qt === 'undefined' || typeof qt.webChannelTransport === 'undefined') {{
+        console.error('[BRIDGE] qt.webChannelTransport not available');
+        if (initAttempts < 5) {{
+          console.log('[BRIDGE] Retrying in 200ms... (attempt ' + initAttempts + ')');
+          setTimeout(initBridge, 200);
+          return;
+        }} else {{
+          setStatus('Bridge init failed after 5 attempts', true);
+          return;
+        }}
+      }}
+      
+      new QWebChannel(qt.webChannelTransport, function(channel) {{
+        console.log('[BRIDGE] QWebChannel callback triggered');
+        bridge = channel.objects.bridge;
+        
+        if (!bridge) {{
+          console.error('[BRIDGE] Bridge object is null');
+          setStatus('Bridge object is null', true);
+          return;
+        }}
+        
+        bridgeReady = true;
+        setStatus('Bridge connected ✓');
+        console.log('[BRIDGE] Bridge initialized successfully');
+        console.log('[BRIDGE] Bridge methods:', Object.keys(bridge));
+        
+        // Test the bridge
+        if (bridge.consoleLog) {{
+          bridge.consoleLog('[JS] Bridge test - connection verified');
+        }} else {{
+          console.warn('[BRIDGE] consoleLog method not found');
+        }}
+        
+        if (bridge.reportCoordinates) {{
+          console.log('[BRIDGE] reportCoordinates method found');
+        }} else {{
+          console.error('[BRIDGE] reportCoordinates method NOT found');
+        }}
+      }});
+    }} catch(err) {{
+      console.error('[BRIDGE] Error during initialization:', err);
+      setStatus('Bridge error: ' + err.message, true);
+    }}
+  }}
   
+  // Initialize Google Map
   function initMap() {{
+    console.log('[MAP] Initializing Google Map...');
     try {{
       const aub = {{lat: 33.8993, lng: 35.4839}};
       
@@ -611,20 +685,27 @@ class AUBusUltimateGUI(QMainWindow):
         fullscreenControl: true
       }});
       
-      // Click marker
+      console.log('[MAP] Map object created');
+      
+      // Click marker (red)
       clickMarker = new google.maps.Marker({{
         position: aub,
         map: map,
         title: 'Selected Location',
-        icon: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+        icon: {{
+          url: 'http://maps.google.com/mapfiles/ms/icons/red-dot.png'
+        }},
+        draggable: false
       }});
       
-      // AUB marker
+      // AUB marker (blue)
       new google.maps.Marker({{
         position: aub,
         map: map,
         title: 'American University of Beirut',
-        icon: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+        icon: {{
+          url: 'http://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+        }}
       }});
       
       // Directions
@@ -635,26 +716,67 @@ class AUBusUltimateGUI(QMainWindow):
       }});
       directionsRenderer.setMap(map);
       
-      // Click handler
-      map.addListener('click', function(e) {{
-        const lat = e.latLng.lat();
-        const lng = e.latLng.lng();
-        clickMarker.setPosition(e.latLng);
-        if(bridge?.reportCoordinates) bridge.reportCoordinates(lat, lng);
+      // Map click handler - CRITICAL SECTION
+      map.addListener('click', function(event) {{
+        console.log('[MAP CLICK] Event triggered');
+        
+        const lat = event.latLng.lat();
+        const lng = event.latLng.lng();
+        
+        console.log('[MAP CLICK] Coordinates:', lat, lng);
+        console.log('[MAP CLICK] Bridge ready:', bridgeReady);
+        console.log('[MAP CLICK] Bridge exists:', !!bridge);
+        
+        // Update marker position
+        clickMarker.setPosition(event.latLng);
+        console.log('[MAP CLICK] Marker updated');
+        
+        // Send to Python through bridge
+        if (!bridgeReady) {{
+          console.error('[MAP CLICK] Bridge not ready!');
+          setStatus('Bridge not ready - click after map loads', true);
+          return;
+        }}
+        
+        if (!bridge) {{
+          console.error('[MAP CLICK] Bridge is null!');
+          setStatus('Bridge is null', true);
+          return;
+        }}
+        
+        if (!bridge.reportCoordinates) {{
+          console.error('[MAP CLICK] reportCoordinates method not found!');
+          setStatus('reportCoordinates not available', true);
+          return;
+        }}
+        
+        try {{
+          console.log('[MAP CLICK] Calling bridge.reportCoordinates...');
+          bridge.reportCoordinates(lat, lng);
+          setStatus('Sent: ' + lat.toFixed(6) + ', ' + lng.toFixed(6));
+          console.log('[MAP CLICK] Coordinates sent to Python successfully');
+        }} catch(err) {{
+          console.error('[MAP CLICK] Error calling reportCoordinates:', err);
+          setStatus('Error: ' + err.message, true);
+        }}
       }});
       
-      console.log('Map initialized successfully');
+      setStatus('Map ready - click anywhere');
+      console.log('[MAP] Map initialized successfully');
+      
     }} catch(err) {{
-      document.getElementById('error').style.display = 'block';
-      console.error('Map init error:', err);
+      console.error('[MAP] Initialization error:', err);
+      setStatus('Map error: ' + err.message, true);
     }}
   }}
   
+  // Clear all markers
   function clearMarkers() {{
     markers.forEach(m => m.setMap(null));
     markers = [];
   }}
   
+  // Add driver markers
   function addDriverMarkers(data) {{
     try {{
       const arr = typeof data === 'string' ? JSON.parse(data) : data;
@@ -675,7 +797,9 @@ class AUBusUltimateGUI(QMainWindow):
             fontWeight: 'bold'
           }},
           title: item.title || 'Driver',
-          icon: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png'
+          icon: {{
+            url: 'http://maps.google.com/mapfiles/ms/icons/green-dot.png'
+          }}
         }});
         
         const infoWindow = new google.maps.InfoWindow({{
@@ -698,6 +822,7 @@ class AUBusUltimateGUI(QMainWindow):
     }}
   }}
   
+  // Draw route between two points
   function drawRoute(oLat, oLng, dLat, dLng) {{
     try {{
       const req = {{
@@ -719,11 +844,16 @@ class AUBusUltimateGUI(QMainWindow):
     }}
   }}
   
+  // Clear route
   function clearRoute() {{
     directionsRenderer.setDirections({{routes: []}});
   }}
   
-  window.onload = initMap;
+  // Initialize everything when page loads
+  window.onload = function() {{
+    initBridge();
+    initMap();
+  }};
 </script>
 </body>
 </html>
@@ -734,8 +864,30 @@ class AUBusUltimateGUI(QMainWindow):
     # ========================================================================
     def on_map_click(self, lat, lng):
         """Handle map click event"""
+        print(f"[Python] Map click received: {lat}, {lng}")
         self.coord_label.setText(f"📍 {lat:.6f}, {lng:.6f}")
-        self.weather_label.setText("Click 'Refresh Weather' to get forecast")
+        
+        # Enable use buttons
+        self.use_for_driver_btn.setEnabled(True)
+        self.use_for_passenger_btn.setEnabled(True)
+        
+        # Auto-fill the appropriate field based on current tab
+        current_tab_index = self.tabs.currentIndex()
+        coord_str = f"{lat:.6f},{lng:.6f}"
+        
+        # Tab indices: 0=Login, 1=Driver, 2=Passenger, 3=Settings
+        if current_tab_index == 1:  # Driver tab
+            self.driver_area.setText(coord_str)
+            self.status_bar.showMessage(f"✅ Driver pickup area set to: {lat:.6f}, {lng:.6f}")
+        elif current_tab_index == 2:  # Passenger tab
+            self.passenger_area.setText(coord_str)
+            self.status_bar.showMessage(f"✅ Passenger area set to: {lat:.6f}, {lng:.6f}")
+        else:
+            self.status_bar.showMessage(f"Location selected: {lat:.6f}, {lng:.6f}")
+        
+        # Auto-refresh weather
+        self.weather_label.setText("Fetching weather...")
+        QTimer.singleShot(100, self.refresh_weather)
     
     def on_map_console_message(self, msg):
         """Handle console messages from JavaScript"""
@@ -748,6 +900,35 @@ class AUBusUltimateGUI(QMainWindow):
             pass
     
     # ========================================================================
+    # COORDINATE USE FUNCTIONS
+    # ========================================================================
+    def use_coords_for_driver(self):
+        """Use selected coordinates for driver pickup area"""
+        if self.map_bridge.last_lat and self.map_bridge.last_lng:
+            # Format as "lat,lng" for the backend
+            coord_str = f"{self.map_bridge.last_lat:.6f},{self.map_bridge.last_lng:.6f}"
+            self.driver_area.setText(coord_str)
+            self.status_bar.showMessage("✅ Coordinates set for driver pickup location")
+            QMessageBox.information(self, "Location Set", 
+                f"Pickup location set to:\n{coord_str}\n\nSelect direction (to/from AUB) and add your ride.")
+        else:
+            QMessageBox.warning(self, "No Location", 
+                "Please click the map to select a location first")
+    
+    def use_coords_for_passenger(self):
+        """Use selected coordinates for passenger area"""
+        if self.map_bridge.last_lat and self.map_bridge.last_lng:
+            # Format as "lat,lng" for the backend
+            coord_str = f"{self.map_bridge.last_lat:.6f},{self.map_bridge.last_lng:.6f}"
+            self.passenger_area.setText(coord_str)
+            self.status_bar.showMessage("✅ Coordinates set for passenger area")
+            QMessageBox.information(self, "Location Set", 
+                f"Pickup area set to:\n{coord_str}\n\nYou can now search for drivers.")
+        else:
+            QMessageBox.warning(self, "No Location", 
+                "Please click the map to select a location first")
+    
+    # ========================================================================
     # PRESET LOCATION HANDLERS
     # ========================================================================
     def set_preset_location(self, lat, lng, name):
@@ -757,30 +938,31 @@ class AUBusUltimateGUI(QMainWindow):
         self.coord_label.setText(f"📍 {lat:.6f}, {lng:.6f} ({name})")
         self.weather_label.setText("Fetching weather...")
         
+        # Enable use buttons
+        self.use_for_driver_btn.setEnabled(True)
+        self.use_for_passenger_btn.setEnabled(True)
+        
         # Auto-refresh weather
         self.refresh_weather()
         
-        # If using folium, update the map marker
-        if not GOOGLE_API_KEY:
-            self.update_folium_marker(lat, lng, name)
-        else:
-            # Update Google Maps marker
-            js = f"if(clickMarker) clickMarker.setPosition({{lat: {lat}, lng: {lng}}});"
+        # Update map marker
+        if GOOGLE_API_KEY:
+            js = f"if(clickMarker) {{ clickMarker.setPosition({{lat: {lat}, lng: {lng}}}); map.setCenter({{lat: {lat}, lng: {lng}}}); }}"
             self.map_view.page().runJavaScript(js)
+        else:
+            self.update_folium_marker(lat, lng, name)
     
     def update_folium_marker(self, lat, lng, name):
-        """Update folium map with new marker (requires map reload)"""
+        """Update folium map with new marker"""
         try:
             m = folium.Map(location=[lat, lng], zoom_start=14)
             folium.Marker([lat, lng], tooltip=name, 
                          popup=f"{name}<br>{lat:.6f}, {lng:.6f}").add_to(m)
             
-            # Add AUB marker if we're not already at AUB
             if name != "AUB":
                 folium.Marker([33.9006, 35.4812], tooltip='AUB',
                              icon=folium.Icon(color='blue')).add_to(m)
             
-            # Add click popup
             m.add_child(folium.LatLngPopup())
             
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
@@ -812,7 +994,6 @@ class AUBusUltimateGUI(QMainWindow):
         response = send_request_to_gateway(payload)
         data_login = response.get("data")
         if str(response.get("status")) in ("200", "201"):
-            # Get full user info
             user_id = data_login.get("userID")
             user_info_req = {
                 "action": "update_personal_info",
@@ -887,13 +1068,12 @@ class AUBusUltimateGUI(QMainWindow):
             "aubID": aub_id,
             "zone": zone
         }
-        print(payload)
+        
         response = send_request_to_gateway(payload)
-        print(response)
+        
         if str(response.get("status")) == "201":
             QMessageBox.information(self, "Success", 
                                   "Account created successfully! Please login.")
-            # Clear fields
             self.signup_username.clear()
             self.signup_password.clear()
             self.signup_email.clear()
@@ -913,30 +1093,37 @@ class AUBusUltimateGUI(QMainWindow):
             QMessageBox.warning(self, "Error", "Please login first")
             return
         
-        source = self.driver_source.text().strip()
-        dest = self.driver_dest.text().strip()
+        area = self.driver_area.text().strip()
+        direction = self.driver_direction.currentText()
         start = self.driver_start_time.time().toString("HH:mm")
         end = self.driver_end_time.time().toString("HH:mm")
         car_id = self.driver_car_id.text().strip() or None
         
-        if not source or not dest:
+        if not area:
             QMessageBox.warning(self, "Input Error", 
-                              "Please enter source and destination")
+                              "Please enter a pickup area or use the map")
             return
         
-        # Get coordinates if checkbox is checked
+        # Determine source and destination based on direction
+        if direction == "to_aub":
+            source = area
+            dest = "AUB, Beirut"
+        else:  # from_aub
+            source = "AUB, Beirut"
+            dest = area
+        
+        # Extract coordinates if area is in "lat,lng" format
         pickup_lat = None
         pickup_lng = None
-        if self.driver_use_map_coords.isChecked():
-            if self.map_bridge.last_lat and self.map_bridge.last_lng:
-                pickup_lat = self.map_bridge.last_lat
-                pickup_lng = self.map_bridge.last_lng
-            else:
-                reply = QMessageBox.question(self, "No Coordinates", 
-                    "No map location selected. Continue without coordinates?",
-                    QMessageBox.Yes | QMessageBox.No)
-                if reply == QMessageBox.No:
-                    return
+        
+        if ',' in area:
+            try:
+                parts = area.split(',')
+                pickup_lat = float(parts[0])
+                pickup_lng = float(parts[1])
+                print(f"[Driver] Using coordinates: {pickup_lat}, {pickup_lng}")
+            except:
+                pass
         
         payload = {
             "action": "update_personal_info",
@@ -953,13 +1140,11 @@ class AUBusUltimateGUI(QMainWindow):
         }
         
         response = send_request_to_gateway(payload)
-        print(payload)
-        print(response)
         
         if str(response.get("status")) in ("200", "201"):
-            QMessageBox.information(self, "Success", "Ride added successfully!")
-            self.driver_source.clear()
-            self.driver_dest.clear()
+            QMessageBox.information(self, "Success", 
+                f"Ride added successfully!\n\nDirection: {direction}\nFrom: {source}\nTo: {dest}")
+            self.driver_area.clear()
             self.status_bar.showMessage("Ride added ✅")
         else:
             QMessageBox.warning(self, "Error", 
@@ -1040,7 +1225,7 @@ class AUBusUltimateGUI(QMainWindow):
     def toggle_auto_refresh(self, checked):
         """Toggle auto-refresh for driver requests"""
         if checked:
-            self.refresh_timer.start(10000)  # 10 seconds
+            self.refresh_timer.start(10000)
             self.refresh_requests()
             self.status_bar.showMessage("Auto-refresh enabled (10s)")
         else:
@@ -1064,15 +1249,6 @@ class AUBusUltimateGUI(QMainWindow):
         area = self.passenger_area.text().strip()
         time_str = self.passenger_time.time().toString("HH:mm")
         direction = self.passenger_direction.currentText()
-        
-        # Use map coordinates if checkbox is checked
-        if self.passenger_use_map.isChecked():
-            if self.map_bridge.last_lat and self.map_bridge.last_lng:
-                area = f"{self.map_bridge.last_lat:.6f},{self.map_bridge.last_lng:.6f}"
-            else:
-                QMessageBox.warning(self, "No Location", 
-                    "Please click the map to select a location first")
-                return
         
         if not area:
             QMessageBox.warning(self, "Input Error", "Please enter an area or use map")
@@ -1110,7 +1286,6 @@ class AUBusUltimateGUI(QMainWindow):
                 item.setData(Qt.UserRole, candidate)
                 self.drivers_list.addItem(item)
                 
-                # Prepare for map
                 lat = candidate.get("ride_lat")
                 lng = candidate.get("ride_lng")
                 if lat and lng:
@@ -1121,7 +1296,6 @@ class AUBusUltimateGUI(QMainWindow):
                         "title": f"{driver} - {source}"
                     })
             
-            # Add markers to map
             if drivers_for_map and GOOGLE_API_KEY:
                 js = f"addDriverMarkers({json.dumps(drivers_for_map)});"
                 self.map_view.page().runJavaScript(js)
@@ -1146,8 +1320,6 @@ class AUBusUltimateGUI(QMainWindow):
             QMessageBox.Yes | QMessageBox.No)
         
         if reply == QMessageBox.Yes:
-            # Note: The backend might need enhancement for passenger accepting
-            # For now, we'll show the driver info
             msg = f"✅ Ride accepted!\n\n"
             msg += f"Driver: {driver}\n"
             msg += f"Source: {candidate.get('ride_source', 'N/A')}\n"
@@ -1183,7 +1355,6 @@ class AUBusUltimateGUI(QMainWindow):
                 "Driver location coordinates not available")
             return
         
-        # Use current map selection or passenger area
         if self.map_bridge.last_lat and self.map_bridge.last_lng:
             origin_lat = self.map_bridge.last_lat
             origin_lng = self.map_bridge.last_lng
@@ -1219,7 +1390,6 @@ class AUBusUltimateGUI(QMainWindow):
         
         if isinstance(response, dict):
             if response.get("weather"):
-                # OpenWeather format
                 try:
                     weather_list = response.get("weather", [{}])
                     main = response.get("main", {})
@@ -1411,7 +1581,6 @@ class AUBusUltimateGUI(QMainWindow):
             QCheckBox::indicator:checked {
                 background: #0066cc;
                 border-color: #0066cc;
-                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iMTAiIHZpZXdCb3g9IjAgMCAxMiAxMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMSA1bDMgMyA3LTciIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgZmlsbD0ibm9uZSIvPjwvc3ZnPg==);
             }
             
             QTextEdit {
