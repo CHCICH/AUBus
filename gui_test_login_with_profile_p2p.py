@@ -1457,6 +1457,7 @@ class AUBusUltimateGUI(QMainWindow):
         self.current_candidates = []
         self.current_request_id = None
         self.pending_requests = []
+        self.notified_accepted_requests = set()  # Track which requests we've already notified about
         
         # Map bridge
         self.map_bridge = MapBridge()
@@ -1466,6 +1467,10 @@ class AUBusUltimateGUI(QMainWindow):
         # Auto-refresh timer for drivers
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self.auto_refresh_requests)
+        
+        # Passenger request check timer
+        self.passenger_check_timer = QTimer()
+        self.passenger_check_timer.timeout.connect(self.check_passenger_accepted_requests)
         
         self.init_ui()
         # Delay map initialization to ensure UI is ready
@@ -1946,7 +1951,7 @@ class AUBusUltimateGUI(QMainWindow):
         drivers_layout = QVBoxLayout()
         
         self.drivers_list = QListWidget()
-        self.drivers_list.itemDoubleClicked.connect(self.accept_selected_driver)
+        self.drivers_list.itemDoubleClicked.connect(self.send_request_to_driver)
         drivers_layout.addWidget(self.drivers_list)
         
         driver_actions = QHBoxLayout()
@@ -1959,7 +1964,7 @@ class AUBusUltimateGUI(QMainWindow):
         driver_actions.addStretch()
         drivers_layout.addLayout(driver_actions)
         
-        info_label = QLabel("💡 Double-click a driver to accept the ride")
+        info_label = QLabel("💡 Double-click a driver to send a ride request")
         info_label.setStyleSheet("color: #666; font-style: italic; font-size: 11px;")
         drivers_layout.addWidget(info_label)
         
@@ -2592,6 +2597,8 @@ class AUBusUltimateGUI(QMainWindow):
             else:
                 self.tabs.setTabEnabled(2, True)
                 self.tabs.setCurrentIndex(2)
+                # Start checking for accepted requests for passengers
+                self.passenger_check_timer.start(10000)  # Check every 10 seconds
 
             self.tabs.setTabEnabled(0, False)
             
@@ -3101,35 +3108,78 @@ class AUBusUltimateGUI(QMainWindow):
         else:
             QMessageBox.warning(self, "Error", response.get("message", "Search failed"))
     
-    def accept_selected_driver(self, item):
-        """Accept a driver"""
+    def send_request_to_driver(self, item):
+        """Send ride request to driver"""
         candidate = item.data(Qt.UserRole)
         driver = candidate.get("owner_username", "Unknown")
+        driver_username = candidate.get('driverUsername') or driver
         ride_id = candidate.get("rideID")
         
         reply = QMessageBox.question(self, "Confirm", 
-            f"Accept ride from {driver}?",
+            f"Send ride request to {driver}?",
             QMessageBox.Yes | QMessageBox.No)
         
         if reply == QMessageBox.Yes:
-            driver_username = candidate.get('driverUsername') or driver
+            # Send request to backend
+            payload = {
+                "action": "send_ride_request",
+                "riderID": self.user["userID"],
+                "rideID": ride_id,
+                "driver_username": driver_username
+            }
             
-            msg = f"✅ Ride accepted!\n\n"
-            msg += f"Driver: {driver}\n"
-            msg += f"Source: {candidate.get('source_name', 'N/A')}\n"
-            msg += f"Destination: {candidate.get('dest_name', 'N/A')}\n"
-            msg += f"Ride ID: {ride_id}"
+            response = send_request_to_gateway(payload)
             
-            if candidate.get("distance_km"):
-                msg += f"\nDistance: {candidate['distance_km']:.1f}km"
+            if response.get("status") == "200":
+                msg = f"✅ Ride request sent to {driver}!\n\n"
+                msg += f"Source: {candidate.get('source_name', 'N/A')}\n"
+                msg += f"Destination: {candidate.get('dest_name', 'N/A')}\n"
+                msg += f"Ride ID: {ride_id}\n\n"
+                msg += f"Waiting for driver to accept your request..."
+                
+                QMessageBox.information(self, "Request Sent", msg)
+                self.status_bar.showMessage(f"Request sent to {driver} 📤")
+            else:
+                QMessageBox.warning(self, "Error", 
+                    response.get("message", "Failed to send request"))
+    
+    def check_passenger_accepted_requests(self):
+        """Check if any passenger requests have been accepted by drivers"""
+        if not self.user or self.user.get("isDriver"):
+            return
+        
+        payload = {
+            "action": "check_passenger_requests",
+            "riderID": self.user["userID"]
+        }
+        
+        response = send_request_to_gateway(payload)
+        
+        if response.get("status") == "200":
+            accepted_requests = response.get("accepted_requests", [])
             
-            msg += f"\n\nOpening chat window..."
-            
-            QMessageBox.information(self, "Ride Accepted", msg)
-            self.status_bar.showMessage(f"Ride accepted with {driver} ✅")
-            
-            # Open P2P chat
-            self.open_p2p_chat(driver_username)
+            # Check for new accepted requests
+            for req in accepted_requests:
+                req_id = req.get("requestID")
+                
+                # Only notify if we haven't notified about this request before
+                if req_id not in self.notified_accepted_requests:
+                    self.notified_accepted_requests.add(req_id)
+                    driver_username = req.get("driver_username", "Unknown")
+                    
+                    # Show notification
+                    msg = f"🎉 Your ride request has been accepted!\n\n"
+                    msg += f"Driver: {driver_username}\n"
+                    msg += f"Email: {req.get('driver_email', 'N/A')}\n"
+                    msg += f"Route: {req.get('route', 'N/A')}\n"
+                    msg += f"Ride ID: {req.get('rideID', 'N/A')}\n\n"
+                    msg += f"Opening chat window with driver..."
+                    
+                    QMessageBox.information(self, "Request Accepted!", msg)
+                    self.status_bar.showMessage(f"Request accepted by {driver_username} ✅")
+                    
+                    # Open P2P chat with driver
+                    QTimer.singleShot(500, lambda: self.open_p2p_chat(driver_username))
     
     def show_route_to_driver(self):
         """Show route to selected driver on map"""

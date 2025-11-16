@@ -711,3 +711,291 @@ def remove_car(data):
     
     except sqlite3.Error as e:
         return {"status": "400", "message": f"Database error: {str(e)}"}
+
+
+def get_driver_requests(data):
+    """
+    Get all pending ride requests for a driver
+    Returns list of requests with rider info and ride details
+    """
+    driver_userid = data.get("driver_userid")
+    
+    if not driver_userid:
+        return {"status": "400", "message": "Missing driver_userid"}
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        
+        # Get all pending requests for rides owned by this driver
+        query = '''
+            SELECT req.requestID, req.riderID, req.rideID, req.status, req.requestTime,
+                   u.username as rider_username, u.email as rider_email,
+                   r.sourceID, r.destinationID,
+                   zs.zoneName as source_name, zd.zoneName as dest_name
+            FROM Request req
+            JOIN Ride r ON req.rideID = r.rideID
+            JOIN "user" u ON req.riderID = u.userID
+            LEFT JOIN Zone zs ON r.sourceID = zs.zoneID
+            LEFT JOIN Zone zd ON r.destinationID = zd.zoneID
+            WHERE r.ownerID = ? AND (req.status = 'pending' OR req.status IS NULL)
+            ORDER BY req.requestTime DESC
+        '''
+        
+        cur.execute(query, (driver_userid,))
+        rows = cur.fetchall()
+        
+        requests = []
+        for row in rows:
+            area = f"{row[9]} → {row[10]}" if row[9] and row[10] else "Unknown route"
+            requests.append({
+                "requestID": row[0],
+                "riderID": row[1],
+                "rideID": row[2],
+                "status": row[3] or "pending",
+                "reqTime": row[4] or "N/A",
+                "rider_username": row[5],
+                "rider_email": row[6],
+                "area": area
+            })
+        
+        conn.close()
+        return {
+            "status": "200",
+            "requests": requests,
+            "count": len(requests)
+        }
+    
+    except sqlite3.Error as e:
+        return {"status": "500", "message": f"Database error: {str(e)}"}
+
+
+def accept_ride_request(data):
+    """
+    Accept a ride request from a passenger
+    Updates request status and returns passenger info for P2P chat
+    """
+    request_id = data.get("requestID")
+    driver_userid = data.get("driver_userid")
+    
+    if not all([request_id, driver_userid]):
+        return {"status": "400", "message": "Missing required fields"}
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        
+        # Verify the request exists and belongs to a ride owned by this driver
+        cur.execute('''
+            SELECT req.requestID, req.riderID, req.rideID, r.ownerID
+            FROM Request req
+            JOIN Ride r ON req.rideID = r.rideID
+            WHERE req.requestID = ?
+        ''', (request_id,))
+        
+        request_data = cur.fetchone()
+        
+        if not request_data:
+            conn.close()
+            return {"status": "404", "message": "Request not found"}
+        
+        if request_data[3] != driver_userid:
+            conn.close()
+            return {"status": "403", "message": "You don't own this ride"}
+        
+        rider_id = request_data[1]
+        ride_id = request_data[2]
+        
+        # Check ride capacity before accepting
+        cur.execute('''
+            SELECT c.capacity, r.carId
+            FROM Ride r
+            JOIN Car c ON r.carId = c.carId
+            WHERE r.rideID = ?
+        ''', (ride_id,))
+        
+        capacity_data = cur.fetchone()
+        
+        if not capacity_data:
+            conn.close()
+            return {"status": "400", "message": "Car information not found for this ride"}
+        
+        max_capacity = capacity_data[0]
+        
+        # Count current riders (excluding driver)
+        cur.execute('SELECT COUNT(*) FROM Rider WHERE rideID = ?', (ride_id,))
+        current_riders = cur.fetchone()[0]
+        
+        if current_riders >= max_capacity:
+            conn.close()
+            return {
+                "status": "400", 
+                "message": f"Ride is at full capacity ({max_capacity} passengers)"
+            }
+        
+        # Update request status to accepted
+        cur.execute('UPDATE Request SET status = ? WHERE requestID = ?', 
+                   ('accepted', request_id))
+        
+        # Add rider to the ride in Rider table
+        try:
+            cur.execute('INSERT INTO Rider (userID, rideID) VALUES (?, ?)', 
+                       (rider_id, ride_id))
+        except sqlite3.IntegrityError:
+            # Rider already added to this ride
+            pass
+        
+        # Get passenger details for P2P chat
+        cur.execute('''
+            SELECT u.username, u.email, ip.userCurrentIP
+            FROM "user" u
+            LEFT JOIN IpInfos ip ON u.userID = ip.userID
+            WHERE u.userID = ?
+        ''', (rider_id,))
+        
+        passenger_data = cur.fetchone()
+        
+        conn.commit()
+        conn.close()
+        
+        if passenger_data:
+            return {
+                "status": "200",
+                "message": "Request accepted successfully",
+                "rideID": ride_id,
+                "passenger": {
+                    "username": passenger_data[0],
+                    "email": passenger_data[1],
+                    "ip": passenger_data[2] or "Not available"
+                }
+            }
+        else:
+            return {"status": "500", "message": "Failed to retrieve passenger info"}
+    
+    except sqlite3.Error as e:
+        return {"status": "500", "message": f"Database error: {str(e)}"}
+
+
+def send_ride_request_to_driver(data):
+    """
+    Create a ride request from passenger to driver
+    This creates a new Request entry in the database
+    """
+    rider_id = data.get("riderID")
+    ride_id = data.get("rideID")
+    driver_username = data.get("driver_username")
+    
+    if not all([rider_id, ride_id]):
+        return {"status": "400", "message": "Missing required fields"}
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        
+        # Verify the ride exists
+        cur.execute('SELECT rideID, ownerID FROM Ride WHERE rideID = ?', (ride_id,))
+        ride_data = cur.fetchone()
+        
+        if not ride_data:
+            conn.close()
+            return {"status": "404", "message": "Ride not found"}
+        
+        driver_id = ride_data[1]
+        
+        # Check if request already exists
+        cur.execute('''
+            SELECT requestID, status FROM Request 
+            WHERE riderID = ? AND rideID = ?
+        ''', (rider_id, ride_id))
+        
+        existing_request = cur.fetchone()
+        
+        if existing_request:
+            if existing_request[1] == 'accepted':
+                conn.close()
+                return {"status": "400", "message": "You already have an accepted request for this ride"}
+            elif existing_request[1] == 'pending':
+                conn.close()
+                return {"status": "400", "message": "You already sent a request for this ride"}
+        
+        # Generate unique request ID
+        import uuid
+        import time
+        request_id = f"REQ_{rider_id}_{ride_id}_{int(time.time())}"
+        current_timestamp = int(time.time())
+        
+        # Create new request
+        cur.execute('''
+            INSERT INTO Request (requestID, riderID, rideID, status, requestTime)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (request_id, rider_id, ride_id, 'pending', current_timestamp))
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            "status": "200",
+            "message": "Ride request sent successfully",
+            "requestID": request_id
+        }
+    
+    except sqlite3.Error as e:
+        return {"status": "500", "message": f"Database error: {str(e)}"}
+
+
+def check_passenger_accepted_requests(data):
+    """
+    Check if any of passenger's requests have been accepted by drivers
+    Returns list of newly accepted requests with driver info
+    """
+    rider_id = data.get("riderID")
+    
+    if not rider_id:
+        return {"status": "400", "message": "Missing riderID"}
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        
+        # Get all accepted requests for this passenger
+        query = '''
+            SELECT req.requestID, req.rideID, req.status,
+                   u.username as driver_username, u.email as driver_email,
+                   r.sourceID, r.destinationID,
+                   zs.zoneName as source_name, zd.zoneName as dest_name,
+                   ip.userCurrentIP as driver_ip
+            FROM Request req
+            JOIN Ride r ON req.rideID = r.rideID
+            JOIN "user" u ON r.ownerID = u.userID
+            LEFT JOIN Zone zs ON r.sourceID = zs.zoneID
+            LEFT JOIN Zone zd ON r.destinationID = zd.zoneID
+            LEFT JOIN IpInfos ip ON u.userID = ip.userID
+            WHERE req.riderID = ? AND req.status = 'accepted'
+            ORDER BY req.requestTime DESC
+        '''
+        
+        cur.execute(query, (rider_id,))
+        rows = cur.fetchall()
+        
+        accepted_requests = []
+        for row in rows:
+            route = f"{row[7]} → {row[8]}" if row[7] and row[8] else "Unknown route"
+            accepted_requests.append({
+                "requestID": row[0],
+                "rideID": row[1],
+                "status": row[2],
+                "driver_username": row[3],
+                "driver_email": row[4],
+                "driver_ip": row[9] or "Not available",
+                "route": route
+            })
+        
+        conn.close()
+        return {
+            "status": "200",
+            "accepted_requests": accepted_requests,
+            "count": len(accepted_requests)
+        }
+    
+    except sqlite3.Error as e:
+        return {"status": "500", "message": f"Database error: {str(e)}"}

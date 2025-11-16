@@ -4,7 +4,7 @@ import time
 import json
 import sqlite3
 from authServer import handle_login, handle_sign_up
-from update_personal_info import personal_info_manager
+from update_personal_info import personal_info_manager, get_driver_requests, accept_ride_request, send_ride_request_to_driver, check_passenger_accepted_requests
 from rideManagement import give_rides_using_filter, get_IP
 from weather import get_weather_info
 
@@ -36,6 +36,14 @@ def handle_client(client_socket):
                 response = get_IP(data)
             elif action == "get_weather":
                 response = get_weather_info(data)
+            elif action == "get_requests":
+                response = get_driver_requests(data)
+            elif action == "accept_ride":
+                response = accept_ride_request(data)
+            elif action == "send_ride_request":
+                response = send_ride_request_to_driver(data)
+            elif action == "check_passenger_requests":
+                response = check_passenger_accepted_requests(data)
             elif action == "quit":
                 try:
                     client_socket.send(json.dumps(response).encode('utf-8'))
