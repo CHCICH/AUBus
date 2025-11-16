@@ -1990,6 +1990,7 @@ class AUBusUltimateGUI(QMainWindow):
             else:
                 self.tabs.setTabEnabled(2, True)
                 self.tabs.setCurrentIndex(2)
+            self.tabs.setTabEnabled(0, False)  # Disable login tab  
             
             QMessageBox.information(self, "Success", f"Welcome, {username}!")
             
