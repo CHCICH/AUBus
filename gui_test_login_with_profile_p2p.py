@@ -2085,26 +2085,42 @@ class AUBusUltimateGUI(QMainWindow):
         if not self.user:
             QMessageBox.warning(self, "Error", "Please login first")
             return
-        
+
+        # Read inputs
         area = self.driver_area.text().strip()
-        direction = self.driver_direction.currentText()
-        start = self.driver_start_time.time().toString("HH:mm")
-        end = self.driver_end_time.time().toString("HH:mm")
-        
-        # NEW: Get selected car from combo box if available
-        if hasattr(self, 'driver_car_combo') and self.driver_car_combo.currentIndex() >= 0:
-            car_id = self.driver_car_combo.currentData()
-            print(f"[Driver] Using car from combo box: {car_id}")
-        # Keep existing car_id from text field as fallback
-        elif car_id:
-            print(f"[Driver] Using car from text field: {car_id}")
-        else:
-            car_id = None
-            print("[Driver] No car selected")
-        
+        direction = self.driver_direction.currentText().strip()
+        start_qt = self.driver_start_time.time()
+        end_qt = self.driver_end_time.time()
+        start = start_qt.toString("HH:mm")
+        end = end_qt.toString("HH:mm")
+
+        # Validate required fields
         if not area:
-            QMessageBox.warning(self, "Input Error", 
-                            "Please enter a pickup area or use the map")
+            QMessageBox.warning(self, "Input Error", "Please enter a pickup area or use the map")
+            return
+
+        if not direction:
+            QMessageBox.warning(self, "Input Error", "Please select a direction")
+            return
+
+        # Ensure start < end (simple guard)
+        if start_qt >= end_qt:
+            QMessageBox.warning(self, "Input Error", "Start time must be before end time")
+            return
+
+        # Car selection is required — prefer combo box if present
+        car_id = None
+        if hasattr(self, 'driver_car_combo'):
+            # Expect the first item to be the placeholder with data None
+            idx = self.driver_car_combo.currentIndex()
+            car_id = self.driver_car_combo.currentData()
+            if idx <= 0 or car_id is None:
+                QMessageBox.warning(self, "Input Error", "Please select a car from the list (or add one in Profile)")
+                return
+            print(f"[Driver] Using car from combo box: {car_id}")
+        else:
+            # No combo present: disallow adding ride without an explicit car id
+            QMessageBox.warning(self, "Input Error", "No car selector available — please add a car in Profile first")
             return
         
         # Extract coordinates if area is in "lat,lng" format
@@ -2120,19 +2136,7 @@ class AUBusUltimateGUI(QMainWindow):
             except:
                 pass
         
-        # Send to ride management server (port 9998)
-        payload = {
-            "action": "add_ride",
-            "userID": self.user["userID"],
-            "carId": car_id,
-            "area": area,
-            "direction": direction,
-            "startTime": start,
-            "endTime": end,
-            "scheduleID": "1",
-            "pickup_lat": pickup_lat,
-            "pickup_lng": pickup_lng
-        }
+        
 
         startTime = start.split(":")
         endTime = end.split(":")
@@ -2154,15 +2158,18 @@ class AUBusUltimateGUI(QMainWindow):
         static_response = send_request_to_gateway(payload_static)
         print("static ",static_response)
 
-        print(f"[Driver] Sending to ride server: {payload}")
-        response = send_request_to_ride_server(payload)
-
-        print(f"[Driver] Response: {response}")
+        response = static_response
         
-        if str(response.get("status")) in ("200", "201"):
-            ride_data = response.get("data", {})
+        response = static_response
+
+        status = str(response.get("status", "")) if isinstance(response, dict) else ""
+        message = response.get("message", "") if isinstance(response, dict) else "No response from server"
+
+        # Success
+        if status in ("200", "201"):
+            ride_data = response.get("data", {}) or {}
             ride_id = ride_data.get("rideID", "N/A")
-            
+
             # Determine source and destination for display
             if direction == "to_aub":
                 source = area
@@ -2170,20 +2177,33 @@ class AUBusUltimateGUI(QMainWindow):
             else:
                 source = "AUB, Beirut"
                 dest = area
-            
-            QMessageBox.information(self, "Success", 
-                f"Ride added successfully!\n\n"
-                f"Ride ID: {ride_id}\n"
-                f"Direction: {direction}\n"
-                f"From: {source}\n"
-                f"To: {dest}\n"
-                f"Time: {start} - {end}")
-            
+
+            # Success popup (do NOT open profile)
+            QMessageBox.information(self, "Ride Created",
+            f"Ride created successfully!\n\n"
+            f"Ride ID: {ride_id}\n"
+            f"Direction: {direction}\n"
+            f"From: {source}\n"
+            f"To: {dest}\n"
+            f"Time: {start} - {end}"
+            )
+
+            # Clear input and update UI
             self.driver_area.clear()
             self.status_bar.showMessage(f"Ride added ✅ (ID: {ride_id})")
+            QTimer.singleShot(300, self.load_driver_cars)  # refresh car list (if relevant)
+
+        elif status == "400":
+            # Show the backend error message in a simple popup (do NOT open profile)
+            err_msg = message or "An error occurred while adding the ride."
+            QMessageBox.warning(self, "Failed to Add Ride", err_msg)
+            self.status_bar.showMessage(f"Failed to add ride: {err_msg} ⚠️")
+
         else:
-            QMessageBox.warning(self, "Error", 
-                            response.get("message", "Failed to add ride"))
+            # Unexpected responses
+            QMessageBox.critical(self, "Server Error",
+                 f"Unexpected server response.\nStatus: {status}\nMessage: {message}")
+            self.status_bar.showMessage("Failed to add ride: unexpected server response ⚠️")
     
     def load_driver_cars(self):
         """Load driver's cars for the combo box"""
