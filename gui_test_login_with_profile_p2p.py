@@ -1691,14 +1691,25 @@ class AUBusUltimateGUI(QMainWindow):
         self.tabs.addTab(tab, "🏠 Login")
     
     def create_driver_tab(self):
-        """Create driver interface tab"""
+        """Create driver interface tab with scroll area"""
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.setContentsMargins(0, 0, 0, 0)
         
-        # Add ride section - COMPACT
+        # Create scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        
+        # Create content widget for scroll area
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(12)
+        
+        # ===== ADD RIDE SECTION =====
         add_ride_group = QGroupBox("➕ Add New Ride")
         add_form = QFormLayout()
-        add_form.setVerticalSpacing(18)  # Reduce spacing
+        add_form.setVerticalSpacing(10)
         
         self.driver_area = QLineEdit()
         self.driver_area.setPlaceholderText("Click 'Use for Driver Pickup' or click map")
@@ -1709,6 +1720,7 @@ class AUBusUltimateGUI(QMainWindow):
         self.driver_start_time = QTimeEdit()
         self.driver_start_time.setDisplayFormat("HH:mm")
         self.driver_start_time.setTime(QTime(8, 0))
+        
         self.driver_end_time = QTimeEdit()
         self.driver_end_time.setDisplayFormat("HH:mm")
         self.driver_end_time.setTime(QTime(16, 0))
@@ -1717,7 +1729,7 @@ class AUBusUltimateGUI(QMainWindow):
         self.driver_car_combo = QComboBox()
         self.driver_car_combo.setPlaceholderText("Select a car (optional)")
         refresh_cars_btn = QPushButton("🔄")
-        refresh_cars_btn.setMaximumWidth(28)
+        refresh_cars_btn.setMaximumWidth(100)
         refresh_cars_btn.setToolTip("Refresh car list")
         refresh_cars_btn.clicked.connect(self.load_driver_cars)
         
@@ -1736,15 +1748,16 @@ class AUBusUltimateGUI(QMainWindow):
         add_form.addRow(add_ride_btn)
         
         add_ride_group.setLayout(add_form)
-        layout.addWidget(add_ride_group)
+        scroll_layout.addWidget(add_ride_group)
         
-        # MY ACTIVE RIDES SECTION - MEDIUM HEIGHT
+        # ===== MY ACTIVE RIDES SECTION =====
         my_rides_group = QGroupBox("📋 My Active Rides")
         my_rides_layout = QVBoxLayout()
         my_rides_layout.setSpacing(6)
 
         self.driver_my_rides_list = QListWidget()
-        self.driver_my_rides_list.setMaximumHeight(150)  # LIMIT HEIGHT
+        self.driver_my_rides_list.setMinimumHeight(120)
+        self.driver_my_rides_list.setMaximumHeight(200)
         self.driver_my_rides_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.driver_my_rides_list.customContextMenuRequested.connect(self.show_driver_ride_menu)
         my_rides_layout.addWidget(self.driver_my_rides_list)
@@ -1758,9 +1771,43 @@ class AUBusUltimateGUI(QMainWindow):
         my_rides_layout.addWidget(info_label)
 
         my_rides_group.setLayout(my_rides_layout)
-        layout.addWidget(my_rides_group)
+        scroll_layout.addWidget(my_rides_group)
         
-        # Pending requests section - COMPACT with scrolling
+        # ===== NOTIFICATION BANNER =====
+        self.notification_banner = QFrame()
+        self.notification_banner.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #ff6b6b, stop:1 #ee5a24);
+                border: 2px solid #c23616;
+                border-radius: 8px;
+                padding: 12px;
+            }
+            QLabel {
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+            }
+        """)
+        self.notification_banner.setVisible(False)
+        
+        notif_layout = QVBoxLayout(self.notification_banner)
+        self.notification_label = QLabel("🔔 New ride request!")
+        self.notification_label.setAlignment(Qt.AlignCenter)
+        notif_layout.addWidget(self.notification_label)
+        
+        notif_btn_layout = QHBoxLayout()
+        view_request_btn = QPushButton("👀 View Request")
+        view_request_btn.clicked.connect(self.scroll_to_requests)
+        dismiss_notif_btn = QPushButton("✖ Dismiss")
+        dismiss_notif_btn.clicked.connect(lambda: self.notification_banner.setVisible(False))
+        notif_btn_layout.addWidget(view_request_btn)
+        notif_btn_layout.addWidget(dismiss_notif_btn)
+        notif_layout.addLayout(notif_btn_layout)
+        
+        scroll_layout.addWidget(self.notification_banner)
+        
+        # ===== PENDING REQUESTS SECTION =====
         requests_group = QGroupBox("📋 Pending Ride Requests")
         requests_layout = QVBoxLayout()
         requests_layout.setSpacing(6)
@@ -1769,7 +1816,7 @@ class AUBusUltimateGUI(QMainWindow):
         self.auto_refresh_checkbox = QCheckBox("Auto-refresh (10s)")
         self.auto_refresh_checkbox.toggled.connect(self.toggle_auto_refresh)
         refresh_btn = QPushButton("🔄")
-        refresh_btn.setMaximumWidth(40)
+        refresh_btn.setMaximumWidth(160)
         refresh_btn.setToolTip("Refresh now")
         refresh_btn.clicked.connect(self.refresh_requests)
         refresh_controls.addWidget(self.auto_refresh_checkbox)
@@ -1778,7 +1825,7 @@ class AUBusUltimateGUI(QMainWindow):
         requests_layout.addLayout(refresh_controls)
         
         self.requests_list = QListWidget()
-        self.requests_list.setMaximumHeight(20)  # LIMIT HEIGHT - KEY CHANGE
+        self.requests_list.setMinimumHeight(150)
         self.requests_list.itemDoubleClicked.connect(self.accept_selected_request)
         requests_layout.addWidget(self.requests_list)
         
@@ -1787,13 +1834,80 @@ class AUBusUltimateGUI(QMainWindow):
         requests_layout.addWidget(info_label)
         
         requests_group.setLayout(requests_layout)
-        layout.addWidget(requests_group)
+        scroll_layout.addWidget(requests_group)
         
-        # Add stretch to push everything to the top
-        layout.addStretch()
+        # Add stretch to push content to top
+        scroll_layout.addStretch()
+        
+        # Set scroll content and add to main layout
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll)
         
         self.tabs.addTab(tab, "🚗 Driver")
-    
+        
+        # Track last request count for notifications
+        self.last_request_count = 0
+
+    # Add this new method for showing notifications
+    def show_request_notification(self, count):
+        """Show notification banner for new requests"""
+        if count == 1:
+            self.notification_label.setText("🔔 New ride request received!")
+        else:
+            self.notification_label.setText(f"🔔 {count} new ride requests received!")
+        
+        self.notification_banner.setVisible(True)
+        
+        # Optional: Play system sound (cross-platform)
+        try:
+            # Try to play system beep
+            if sys.platform == "win32":
+                import winsound
+                winsound.MessageBeep()
+            elif sys.platform == "darwin":
+                os.system('afplay /System/Library/Sounds/Glass.aiff')
+            else:
+                # Linux - try to use paplay or aplay
+                os.system('paplay /usr/share/sounds/freedesktop/stereo/message.oga 2>/dev/null || aplay /usr/share/sounds/alsa/Front_Center.wav 2>/dev/null')
+        except:
+            pass  # Silent fail if sound doesn't work
+        
+        # Flash the window (if not in focus)
+        try:
+            self.activateWindow()
+            self.raise_()
+        except:
+            pass
+
+
+    def scroll_to_requests(self):
+        """Scroll to the requests section and dismiss notification"""
+        self.notification_banner.setVisible(False)
+        # The scroll widget is in the driver tab
+        if self.tabs.currentIndex() == 1:  # Driver tab
+            # Get the scroll area
+            driver_tab = self.tabs.widget(1)
+            scroll = driver_tab.findChild(QScrollArea)
+            if scroll:
+                # Scroll to bottom where requests are
+                scroll.verticalScrollBar().setValue(
+                    scroll.verticalScrollBar().maximum()
+                )
+
+    # Add this new method to scroll to requests section
+    def scroll_to_requests(self):
+        """Scroll to the requests section and dismiss notification"""
+        self.notification_banner.setVisible(False)
+        # The scroll widget is in the driver tab
+        if self.tabs.currentIndex() == 1:  # Driver tab
+            # Get the scroll area
+            driver_tab = self.tabs.widget(1)
+            scroll = driver_tab.findChild(QScrollArea)
+            if scroll:
+                # Scroll to bottom where requests are
+                scroll.verticalScrollBar().setValue(
+                    scroll.verticalScrollBar().maximum()
+                )
     def create_passenger_tab(self):
         """Create passenger interface tab"""
         tab = QWidget()
@@ -2698,7 +2812,7 @@ class AUBusUltimateGUI(QMainWindow):
             self.status_bar.showMessage("Error loading cars")
 
     def refresh_requests(self):
-        """Refresh pending ride requests for driver"""
+        """Refresh pending ride requests for driver with notifications"""
         if not self.user:
             return
         
@@ -2715,6 +2829,15 @@ class AUBusUltimateGUI(QMainWindow):
             requests = response.get("requests", [])
             self.pending_requests = requests
             
+            # Check for new requests
+            new_request_count = len(requests)
+            if new_request_count > self.last_request_count and self.last_request_count > 0:
+                # Show notification
+                new_count = new_request_count - self.last_request_count
+                self.show_request_notification(new_count)
+            
+            self.last_request_count = new_request_count
+            
             for req in requests:
                 req_id = req.get("requestID", "")
                 rider_id = req.get("riderID", "")
@@ -2728,10 +2851,12 @@ class AUBusUltimateGUI(QMainWindow):
             
             self.status_bar.showMessage(f"Found {len(requests)} pending requests")
         else:
+            self.last_request_count = 0
             self.status_bar.showMessage("No pending requests")
+
     
     def accept_selected_request(self, item):
-        """Accept a ride request"""
+        """Accept a ride request and open P2P chat"""
         if not self.user:
             return
         
@@ -2765,25 +2890,34 @@ class AUBusUltimateGUI(QMainWindow):
                 msg += f"Opening chat window..."
                 
                 QMessageBox.information(self, "Success", msg)
-                self.refresh_requests()
-                self.status_bar.showMessage("Request accepted ✅")
                 
-                # Open P2P chat
-                self.open_p2p_chat(passenger_username)
+                # after you build the msg and show the success dialog...
+                QMessageBox.information(self, "Request Accepted", msg)
+                self.status_bar.showMessage(f"Request accepted with {passenger_username} ✅")
+
+                # give the management server a moment to register / exchange info, then open chat
+                QTimer.singleShot(500, lambda: self.open_p2p_chat(passenger_username))
+
+                
             else:
                 QMessageBox.warning(self, "Error", 
                     response.get("message", "Failed to accept request"))
+
     
     def toggle_auto_refresh(self, checked):
         """Toggle auto-refresh for driver requests"""
         if checked:
+            # Initialize counter when starting
+            if not hasattr(self, 'last_request_count'):
+                self.last_request_count = 0
+            
             self.refresh_timer.start(10000)
             self.refresh_requests()
             self.status_bar.showMessage("Auto-refresh enabled (10s)")
         else:
             self.refresh_timer.stop()
             self.status_bar.showMessage("Auto-refresh disabled")
-    
+            
     def auto_refresh_requests(self):
         """Auto-refresh callback"""
         if self.user and self.user.get("isDriver"):
@@ -3031,26 +3165,30 @@ class AUBusUltimateGUI(QMainWindow):
         self.status_bar.showMessage("Route displayed on map 🗺")
 
 
-    def open_p2p_chat(self, peer_username):
+    def open_p2p_chat(self, peer_username, management_server=None, management_port=10000):
         """Open P2P chat window with peer"""
         if not self.user:
             QMessageBox.warning(self, "Error", "Not logged in")
             return
-        
+
+        # default to configured gateway host if none provided
+        management_server = management_server or GATEWAY_HOST
+
         try:
-            # Create and show chat dialog
+            # Create and show chat dialog (pass management server explicitly)
             chat_dialog = P2PChatDialog(
                 parent=self,
                 my_username=self.user["username"],
                 peer_username=peer_username,
-                management_server="127.0.0.1",  # Change if server is remote
-                management_port=10000
+                management_server=management_server,
+                management_port=management_port
             )
             chat_dialog.show()
             self.status_bar.showMessage(f"Chat opened with {peer_username} 💬")
         except Exception as e:
             QMessageBox.critical(self, "Chat Error", f"Failed to open chat: {str(e)}")
-            print(f"[Chat Error] {e}")    
+            print(f"[Chat Error] {e}")
+
     # ========================================================================
     # UTILITY FUNCTIONS
     # ========================================================================
