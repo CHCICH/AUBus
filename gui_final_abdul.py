@@ -2250,6 +2250,34 @@ class AUBusUltimateGUI(QMainWindow):
         print(f"[Passenger] Sending to ride server: {payload}")
         response = send_request_to_ride_server(payload)
         print(f"[Passenger] Response: {response}")
+
+
+        pickup_lat = None
+        pickup_lng = None
+        
+        if ',' in area:
+            try:
+                parts = area.split(',')
+                pickup_lat = float(parts[0])
+                pickup_lng = float(parts[1])
+            except:
+                pass
+
+        static_payload = {
+            "userID": self.user["userID"],
+            "filter": {
+              "rating": [0, 5],
+              "distance": 3,
+              "date": [int(time_str.split(":")[0]) * 60 + int(time_str.split(":")[1]), 9999999]
+            },
+            "userLocation": {
+              "lat": pickup_lat,
+              "lon": pickup_lng
+            }
+        }
+        print(static_payload)
+        static_response = send_request_to_gateway(static_payload)
+        print(static_response)
         
         if response.get("status") == "200":
             data = response.get("data", {})

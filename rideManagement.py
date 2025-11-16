@@ -33,24 +33,41 @@ def give_rides_using_filter(data):
         r_end = float(rating_range[1])
 
         try:
-            user_lat = float(userCurrentLocation.get("lat", userCurrentLocation[0]))
-            user_lon = float(userCurrentLocation.get("lon", userCurrentLocation[1]))
+            user_lat = float(userCurrentLocation.get("lat"))
+            user_lon = float(userCurrentLocation.get("lon"))
         except Exception:
             return {"status": "400", "message": "invalid userLocation"}
         
         deg_thresh = float(dist_km) / 111.0
         deg_thresh_sq = deg_thresh * deg_thresh
-
-        sql = """
-            SELECT Ride.* FROM Ride
-            JOIN User ON Ride.ownerID = User.userID
-            WHERE User.rating BETWEEN ? AND ?
-              AND Ride.startTime >= ? AND Ride.endTime <= ?
-              AND ((Ride.sourceLat - ?)*(Ride.sourceLat - ?) + (Ride.sourceLon - ?)*(Ride.sourceLon - ?)) <= ?
+        sql ="""
+            SELECT 
+            Ride.rideID,
+            Ride.ownerID,
+            Ride.carId,
+            Ride.sourceID,
+            Ride.destinationID,
+            Ride.startTime,
+            Ride.endTime,
+            Ride.scheduleID
+        FROM Ride
+        JOIN Zone AS Zsrc ON Ride.sourceID = Zsrc.zoneID
+        WHERE 
+            Ride.startTime >= ?
+            AND Ride.endTime <= ?
+            AND ((Zsrc.zoneX - ?) * (Zsrc.zoneX - ?) +
+                 (Zsrc.zoneY - ?) * (Zsrc.zoneY - ?)) <= ?;
+        
         """
-        params = (r_start, r_end, start_ts, end_ts, user_lat, user_lat, user_lon, user_lon, deg_thresh_sq)
+        params = (
+            start_ts, end_ts,
+            user_lat, user_lat,
+            user_lon, user_lon,
+            deg_thresh_sq
+        )
         curr.execute(sql, params)
         rows = curr.fetchall()
+        print(rows)
         conn.close()
         rides_list = []
         for ride in rows:
