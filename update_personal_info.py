@@ -240,6 +240,8 @@ def update_zone(data):
     """Update user's zone information"""
     userID = data.get("userID")
     zone = data.get("zone")
+    zoneX = data.get("zoneX")
+    zoneY = data.get("zoneY")
     
     try:
         conn = sqlite3.connect('aubus.db')
@@ -251,12 +253,12 @@ def update_zone(data):
         
         if existing_zone:
             # Update existing zone
-            cur.execute('UPDATE Zone SET zoneName=? WHERE UserID=?', (zone, userID))
+            cur.execute('UPDATE Zone SET zoneName=?, zoneX=?, zoneY=? WHERE UserID=?', (zone, float(zoneX), float(zoneY), userID))
         else:
             # Create new zone entry
             zone_id = f"zone_{int(time.time()*1000)}"
-            cur.execute('INSERT INTO Zone (zoneID, zoneName, UserID) VALUES (?, ?, ?)', 
-                       (zone_id, zone, userID))
+            cur.execute('INSERT INTO Zone (zoneID, zoneX, zoneY, zoneName, UserID) VALUES (?, ?, ?, ?, ?)', 
+                       (zone_id, float(zoneX), float(zoneY), zone, userID))
         
         conn.commit()
         conn.close()
