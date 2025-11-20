@@ -11,6 +11,8 @@ def personal_info_manager(data):
         return handle_edit_name(data)
     elif req_code == "add_ride":
         return add_ride(data)
+    elif req_code == "edit_ride":
+        return edit_ride(data) 
     elif req_code == "remove_ride":
         return remove_ride(data)
     elif req_code == "cancel_ride":
@@ -25,6 +27,8 @@ def personal_info_manager(data):
         return give_user_personal_informations(data)
     elif req_code == "get_rating":
         return get_rating(data)
+    elif req_code == "submit_rating":  
+        return submit_rating(data) 
     elif req_code == "update_zone":
         return update_zone(data)
     elif req_code == "get_zone":
@@ -195,6 +199,116 @@ def add_ride(data):
         if 'conn' in locals():
             conn.close()
 
+def edit_ride(data):
+    """
+    Edit an existing ride with proper validation and conflict checking
+    """
+    ride_id = data.get("rideID")
+    user_id = data.get("userID")
+    car_id = data.get("carId")
+    source = data.get("source")
+    destination = data.get("destination")
+    start_time = data.get("startTime")
+    end_time = data.get("endTime")
+    schedule_id = data.get("scheduleID")
+    
+    if not all([ride_id, user_id, source, destination, start_time, end_time]):
+        return {"status": "400", "message": "Missing required fields"}
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        
+        # Verify the user owns this ride
+        cur.execute('SELECT ownerID, scheduleID FROM Ride WHERE rideID=?', (ride_id,))
+        ride_data = cur.fetchone()
+        
+        if not ride_data:
+            conn.close()
+            return {"status": "404", "message": "Ride not found"}
+        
+        if ride_data[0] != user_id:
+            conn.close()
+            return {"status": "403", "message": "You can only edit your own rides"}
+        
+        # Verify car ownership if car_id is provided
+        if car_id:
+            cur.execute('SELECT ownerID FROM Car WHERE carId=?', (car_id,))
+            car_owner = cur.fetchone()
+            if not car_owner or car_owner[0] != user_id:
+                conn.close()
+                return {"status": "403", "message": "You don't own this car"}
+        
+        # Check for time conflicts with other rides in the same schedule (excluding current ride)
+        cur.execute('SELECT startTime, endTime FROM Ride WHERE scheduleID=? AND rideID!=?', 
+                   (ride_data[1], ride_id))
+        existing_rides = cur.fetchall()
+        
+        if existing_rides:
+            ride_times = [(ride[0], ride[1]) for ride in existing_rides]
+            if checkIntersection(ride_times, (int(start_time), int(end_time))):
+                conn.close()
+                return {"status": "400", "message": "Ride time conflicts with existing schedule"}
+        
+        # Handle zone creation/updates
+        zone0 = str(source[0]) + str(source[1]) if isinstance(source, tuple) else str(source)
+        zone1 = str(destination[0]) + str(destination[1]) if isinstance(destination, tuple) else str(destination)
+        
+        # Create/update source zone
+        cur.execute('SELECT * FROM "Zone" WHERE zoneID=?', (zone0,))
+        source_row = cur.fetchone()
+        if not source_row:
+            if isinstance(source, tuple) and len(source) == 2:
+                cur.execute('INSERT INTO "Zone" (zoneID,zoneX,zoneY,zoneName, UserID) VALUES (?, ?, ?, ?, ?)', 
+                           (zone0, float(source[0]), float(source[1]), "Zone " + zone0, user_id))
+            else:
+                cur.execute('INSERT INTO "Zone" (zoneID,zoneX,zoneY,zoneName, UserID) VALUES (?, ?, ?, ?, ?)', 
+                           (zone0, 33.8958, 35.4787, str(source), user_id))
+        
+        # Create/update destination zone
+        cur.execute('SELECT * FROM "Zone" WHERE zoneID=?', (zone1,))
+        dest_row = cur.fetchone()
+        if not dest_row:
+            if isinstance(destination, tuple) and len(destination) == 2:
+                cur.execute('INSERT INTO "Zone" (zoneID,zoneX,zoneY,zoneName, UserID) VALUES (?, ?, ?, ?, ?)', 
+                           (zone1, float(destination[0]), float(destination[1]), "Zone " + zone1, user_id))
+            else:
+                cur.execute('INSERT INTO "Zone" (zoneID,zoneX,zoneY,zoneName, UserID) VALUES (?, ?, ?, ?, ?)', 
+                           (zone1, 33.9006, 35.4812, str(destination), user_id))
+        
+        # Update the ride
+        update_query = '''
+            UPDATE Ride 
+            SET carId=?, sourceID=?, destinationID=?, startTime=?, endTime=?
+            WHERE rideID=?
+        '''
+        cur.execute(update_query, (car_id, zone0, zone1, start_time, end_time, ride_id))
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            "status": "200",
+            "message": "Ride updated successfully",
+            "data": {
+                "rideID": ride_id,
+                "carId": car_id,
+                "source": source,
+                "destination": destination,
+                "startTime": start_time,
+                "endTime": end_time,
+                "scheduleID": schedule_id
+            }
+        }
+        
+    except sqlite3.Error as e:
+        return {"status": "500", "message": f"Database error: {str(e)}"}
+    except Exception as e:
+        return {"status": "500", "message": f"Error: {str(e)}"}
+    finally:
+        if 'conn' in locals():
+            conn.close()
+
 def remove_ride(data):
     ride_id = data.get("rideID")
     try:
@@ -251,10 +365,7 @@ def cancel_ride(data):
 
 
 def request_ride(data):
-    """
-    Handle ride requests from passengers
-    Search for matching rides in database with filters
-    """
+
     rider_id = data.get("riderID")
     area = data.get("area")
     time_str = data.get("time")
@@ -265,7 +376,6 @@ def request_ride(data):
         return {"status": "400", "message": "Missing required fields"}
     
     try:
-        # Parse coordinates from area if available
         pickup_lat = None
         pickup_lng = None
         if ',' in str(area):
@@ -276,14 +386,12 @@ def request_ride(data):
             except:
                 pass
         
-        # Convert time to minutes
         time_parts = time_str.split(':')
         requested_time = int(time_parts[0]) * 60 + int(time_parts[1])
+        print(requested_time)
         
         conn = sqlite3.connect('aubus.db')
         cur = conn.cursor()
-        
-        # Find matching rides
         query = '''
             SELECT r.rideID, r.ownerID, r.carId, r.sourceID, r.destinationID, 
                    r.startTime, r.endTime, r.scheduleID,
@@ -297,50 +405,38 @@ def request_ride(data):
             WHERE r.startTime <= ? AND r.endTime >= ?
         '''
         
-        # Allow rides that cover the requested time (30 min window)
         time_window_start = requested_time - 30
         time_window_end = requested_time + 30
         
         cur.execute(query, (time_window_end, time_window_start))
         rides = cur.fetchall()
+        print(rides)
+        conn.close()
         
-        # Build candidate list
         candidates = []
         for ride in rides:
-            # Skip if it's the rider's own ride
             if ride[1] == rider_id:
                 continue
             
-            # Check direction match
             source_name = ride[10] or ""
             dest_name = ride[13] or ""
             
-            if direction == "to_aub":
-                # Looking for rides going TO AUB
-                if "AUB" not in dest_name.upper() and "33.9" not in str(ride[14]):
-                    continue
-            else:  # from_aub
-                # Looking for rides FROM AUB
-                if "AUB" not in source_name.upper() and "33.9" not in str(ride[11]):
-                    continue
+            # if direction == "to_aub":
+            #     if "AUB" not in dest_name.upper() and "33.9" not in str(ride[14]):
+            #         continue
+            # else:  
+            #     if "AUB" not in source_name.upper() and "33.9" not in str(ride[11]):
+            #         continue
             
-            # Get driver rating
-            cur.execute('SELECT AVG(score) FROM Rating WHERE rateeID = ?', (ride[1],))
-            rating_result = cur.fetchone()
-            avg_rating = rating_result[0] if rating_result[0] else 0.0
-            
-            # Filter by minimum rating
-            if avg_rating < min_rating:
-                continue
-            
-            # Calculate distance if coordinates available
             distance_km = None
             if pickup_lat and pickup_lng and ride[11] and ride[12]:
                 lat_diff = abs(pickup_lat - float(ride[11]))
                 lng_diff = abs(pickup_lng - float(ride[12]))
                 distance_km = ((lat_diff ** 2 + lng_diff ** 2) ** 0.5) * 111
+                
+                if distance_km > 5:
+                    continue
             
-            # Convert time back to HH:MM format
             start_hours = int(ride[5]) // 60
             start_mins = int(ride[5]) % 60
             end_hours = int(ride[6]) // 60
@@ -363,14 +459,11 @@ def request_ride(data):
                 "pickup_lng": ride[12],
                 "dest_lat": ride[14],
                 "dest_lng": ride[15],
-                "rating": round(avg_rating, 1),
                 "distance_km": round(distance_km, 2) if distance_km else None
             }
             candidates.append(candidate)
         
-        conn.close()
-        
-        # Sort by distance if available, otherwise by start time
+        print(candidates)
         if any(c.get('distance_km') for c in candidates):
             candidates.sort(key=lambda x: x.get('distance_km') or 999)
         else:
@@ -389,6 +482,7 @@ def request_ride(data):
         return {"status": "500", "message": f"Database error: {str(e)}"}
     except Exception as e:
         return {"status": "500", "message": f"Error: {str(e)}"}
+
 
 
 def get_my_rides_detailed(data):
@@ -531,6 +625,91 @@ def get_rating(data):
         return {"status": "200", "message": "Ratings retrieved successfully", "data": ratings_list, "average_score": average_score}
     except sqlite3.Error as e:
         return {"status": "400", "message": str("an unexpected error occurred: it seems that the service is down")}
+    
+def submit_rating(data):
+    """Submit a rating for a user"""
+    rater_username = data.get("raterID")  # This is actually username
+    ratee_username = data.get("rateeID")  # This is actually username
+    ride_id = data.get("rideID")
+    score = data.get("score")
+    comment = data.get("comment", "")
+    
+    print(f"[BACKEND DEBUG] Received rating: rater={rater_username}, ratee={ratee_username}, ride={ride_id}, score={score}")
+    
+    if not all([rater_username, ratee_username, ride_id, score]):
+        return {"status": "400", "message": "Missing required fields"}
+    
+    try:
+        conn = sqlite3.connect('aubus.db')
+        cur = conn.cursor()
+        
+        # Convert usernames to user IDs
+        cur.execute('SELECT userID FROM "user" WHERE username=?', (rater_username,))
+        rater_result = cur.fetchone()
+        if not rater_result:
+            conn.close()
+            return {"status": "400", "message": "Rater user not found"}
+        rater_id = rater_result[0]
+        
+        cur.execute('SELECT userID FROM "user" WHERE username=?', (ratee_username,))
+        ratee_result = cur.fetchone()
+        if not ratee_result:
+            conn.close()
+            return {"status": "400", "message": "Ratee user not found"}
+        ratee_id = ratee_result[0]
+        
+        print(f"[BACKEND DEBUG] Converted to IDs: rater_id={rater_id}, ratee_id={ratee_id}")
+        
+        # Check if rating already exists for this ride
+        cur.execute('SELECT ratingID FROM Rating WHERE raterID=? AND rateeID=? AND rideID=?', 
+                   (rater_id, ratee_id, ride_id))
+        existing_rating = cur.fetchone()
+        
+        if existing_rating:
+            conn.close()
+            return {"status": "400", "message": "You have already rated this user for this ride"}
+        
+        # For chat-based ratings (fallback ride IDs), skip ride validation
+        # For real rides, validate they exist in the system
+        if not ride_id.startswith('chat_ride_'):
+            # Verify the ride exists in the Ride table
+            cur.execute('SELECT rideID FROM Ride WHERE rideID = ?', (ride_id,))
+            ride_exists = cur.fetchone()
+            if not ride_exists:
+                conn.close()
+                return {"status": "400", "message": "Ride not found in system"}
+        
+        # Convert score to integer (database expects INTEGER)
+        try:
+            score_int = int(float(score))  # Convert to float then to int
+            if score_int < 0 or score_int > 5:
+                conn.close()
+                return {"status": "400", "message": "Score must be between 0 and 5"}
+        except (ValueError, TypeError):
+            conn.close()
+            return {"status": "400", "message": "Invalid score format"}
+        
+        # Insert new rating
+        rating_id = f"rating_{int(time.time()*1000)}"
+        print(f"[BACKEND DEBUG] Inserting rating: ratingID={rating_id}, raterID={rater_id}, rateeID={ratee_id}, rideID={ride_id}, score={score_int}")
+        
+        cur.execute('INSERT INTO Rating (ratingID, raterID, rateeID, rideID, score, comment) VALUES (?, ?, ?, ?, ?, ?)',
+                   (rating_id, rater_id, ratee_id, ride_id, score_int, comment))
+        
+        conn.commit()
+        
+        # Verify the rating was inserted
+        cur.execute('SELECT * FROM Rating WHERE ratingID=?', (rating_id,))
+        inserted_rating = cur.fetchone()
+        print(f"[BACKEND DEBUG] Rating inserted: {inserted_rating is not None}")
+        
+        conn.close()
+        
+        return {"status": "200", "message": "Rating submitted successfully"}
+    
+    except sqlite3.Error as e:
+        print(f"[BACKEND DEBUG] Database error: {str(e)}")
+        return {"status": "500", "message": f"Database error: {str(e)}"}
     
 def update_zone(data):
     """Update user's zone information"""

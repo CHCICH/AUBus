@@ -86,10 +86,11 @@ class P2PChatDialog(QDialog):
     status_update = pyqtSignal(str)
     connection_established = pyqtSignal()
     
-    def __init__(self, parent, my_username, peer_username, management_server="127.0.0.1", management_port=10000):
+    def __init__(self, parent, my_username, peer_username, ride_id = None, management_server="127.0.0.1", management_port=10000):
         super().__init__(parent)
         self.my_username = my_username
         self.peer_username = peer_username
+        self.ride_id = ride_id
         self.management_server = management_server
         self.management_port = management_port
         
@@ -108,6 +109,9 @@ class P2PChatDialog(QDialog):
         self.message_received.connect(self.display_message)
         self.status_update.connect(self.update_status_label)
         self.connection_established.connect(self.enable_chat_input)
+
+        self.has_rated = False 
+        self.rating_button = None 
         
         self.init_ui()
         self.auto_connect()
@@ -168,6 +172,12 @@ class P2PChatDialog(QDialog):
         self.status_label.setStyleSheet("color: #FFA500; padding: 5px;")
         layout.addWidget(self.status_label)
         
+        # Rating
+        self.rating_button = QPushButton("⭐ Rate This Ride")
+        self.rating_button.setObjectName("ratingButton")
+        self.rating_button.clicked.connect(self.show_rating_dialog)
+        self.rating_button.setVisible(False)
+        layout.addWidget(self.rating_button)
         # Chat display
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
@@ -368,12 +378,128 @@ class P2PChatDialog(QDialog):
             self.status_label.setStyleSheet("color: #FFA500; font-weight: bold; padding: 5px;")
         else:
             self.status_label.setStyleSheet("color: #E94E77; font-weight: bold; padding: 5px;")
+
+    def show_rating_dialog(self):
+        """Show rating dialog to rate the other person"""
+        if self.has_rated:
+            return
+        
+        # Create rating dialog
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Rate Your Ride")
+        dialog.setModal(True)
+        dialog.resize(300, 200)
+        
+        layout = QVBoxLayout(dialog)
+        
+        # Title
+        title = QLabel(f"Rate {self.peer_username}")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #0066cc;")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+        
+        # Rating instruction
+        instruction = QLabel("How was your ride experience?")
+        instruction.setAlignment(Qt.AlignCenter)
+        layout.addWidget(instruction)
+        
+        # Rating input
+        rating_layout = QHBoxLayout()
+        rating_label = QLabel("Rating (0.0 - 5.0):")
+        self.rating_input = QLineEdit()
+        self.rating_input.setPlaceholderText("e.g., 4.5")
+        self.rating_input.setValidator(QDoubleValidator(0.0, 5.0, 1))
+        rating_layout.addWidget(rating_label)
+        rating_layout.addWidget(self.rating_input)
+        layout.addLayout(rating_layout)
+        
+        # Comment input
+        comment_layout = QVBoxLayout()
+        comment_label = QLabel("Optional Comment:")
+        self.comment_input = QTextEdit()
+        self.comment_input.setMaximumHeight(60)
+        self.comment_input.setPlaceholderText("Add a comment about your ride experience...")
+        comment_layout.addWidget(comment_label)
+        comment_layout.addWidget(self.comment_input)
+        layout.addLayout(comment_layout)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        submit_btn = QPushButton("Submit Rating")
+        submit_btn.clicked.connect(lambda: self.submit_rating(dialog))
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dialog.reject)
+        button_layout.addWidget(submit_btn)
+        button_layout.addWidget(cancel_btn)
+        layout.addLayout(button_layout)
+        
+        dialog.exec_()
+
+    def submit_rating(self, dialog):
+        """Submit rating to backend"""
+        rating_text = self.rating_input.text().strip()
+        comment = self.comment_input.toPlainText().strip()
+        
+        if not rating_text:
+            QMessageBox.warning(self, "Error", "Please enter a rating")
+            return
+        
+        try:
+            rating = float(rating_text)
+            if rating < 0.0 or rating > 5.0:
+                QMessageBox.warning(self, "Error", "Rating must be between 0.0 and 5.0")
+                return
+        except ValueError:
+            QMessageBox.warning(self, "Error", "Please enter a valid number")
+            return
+        
+        # Send rating to backend
+        rating_payload = {
+            "action" : "update_personal_info",
+            "type_of_connection": "submit_rating",
+            "raterID": self.my_username,  # Person giving the rating
+            "rateeID": self.peer_username,  # Person being rated
+            "rideID": self.ride_id,
+            "score": rating,
+            "comment": comment
+        }
+        
+        try:
+            response = send_request_to_gateway(rating_payload)
+            
+            if response.get("status") == "200":
+                QMessageBox.information(self, "Success", "Rating submitted successfully!")
+                self.has_rated = True
+                self.rating_button.setVisible(False)
+                dialog.accept()
+                
+                # Refresh parent window to show updated rating
+                if self.parent():
+                    try:
+                        # Try to refresh profile if it's open
+                        if hasattr(self.parent(), 'profile_window') and self.parent().profile_window:
+                            self.parent().profile_window.refresh_profile_data()
+                        # Refresh main window user info
+                        if hasattr(self.parent(), 'refresh_profile_data'):
+                            self.parent().refresh_profile_data()
+                    except:
+                        pass
+                        
+            else:
+                QMessageBox.warning(self, "Error", 
+                                f"Failed to submit rating: {response.get('message', 'Unknown error')}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to submit rating: {str(e)}")
     
     def enable_chat_input(self):
         """Enable chat input when connected"""
         self.message_input.setEnabled(True)
         self.send_btn.setEnabled(True)
         self.message_input.setFocus()
+
+        if not self.has_rated:
+            self.rating_button.setVisible(True)
     
     def close_chat(self):
         """Close the chat dialog"""
@@ -452,7 +578,7 @@ class MapBridge(QObject):
 # PROFILE WINDOW
 # ============================================================================
 class ProfileWindow(QDialog):
-    def __init__(self, parent=None, user_data=None, send_static_request=None, isd = False):
+    def __init__(self, parent=None, user_data=None, send_static_request=None, isd=False):
         super().__init__(parent)
         self.user_data = user_data
         print(self.user_data)
@@ -604,6 +730,7 @@ class ProfileWindow(QDialog):
             avg_score = rating_response.get("average_score", 0)
             self.profile_rating.setText(f"{avg_score:.1f}")
 
+        # Get user zone
         zone_req = {
             "action": "update_personal_info", 
             "type_of_connection": "get_zone",
@@ -611,8 +738,12 @@ class ProfileWindow(QDialog):
         }
         
         zone_response = self.send_static_request(zone_req)
-        zone_name = zone_response.get('data')
-        self.profile_zone.setText(zone_name.get('zoneName', "N/A"))
+        if zone_response.get("status") == "200":
+            zone_name = zone_response.get('data', {})
+            if isinstance(zone_name, dict):
+                self.profile_zone.setText(zone_name.get('zoneName', "N/A"))
+            else:
+                self.profile_zone.setText("N/A")
         
         # Refresh role-specific data
         if is_driver:
@@ -636,20 +767,16 @@ class ProfileWindow(QDialog):
         
         if response.get("status") == "200":
             rides = response.get("data", [])
-            
             if not rides:
                 self.my_rides_list.addItem("No rides found. Add a ride from the Driver tab!")
                 return
             
             for ride in rides:
-                direction_emoji = "➡️" if ride.get("direction") == "to_aub" else "⬅️"
-                source = ride.get("source_name", "Unknown")
-                dest = ride.get("dest_name", "Unknown")
-                start = ride.get("startTime", "N/A")
-                end = ride.get("endTime", "N/A")
-                car = ride.get("car_plate", "N/A")
-                
-                item_text = f"{direction_emoji} {source} → {dest} | ⏱ {start}-{end} | 🚗 {car}"
+                ride_id = ride.get('sourceID', 'Unknown')
+                start_time = ride.get('startTime', '08:00')
+                end_time = ride.get('endTime', '16:00')
+
+                item_text = f"From {ride_id} - To AUB: {start_time} - From AUB: {end_time}"
                 item = QListWidgetItem(item_text)
                 item.setData(Qt.UserRole, ride)
                 self.my_rides_list.addItem(item)
@@ -664,8 +791,7 @@ class ProfileWindow(QDialog):
         """Refresh passenger's ride history"""
         self.ride_history_list.clear()
         self.ride_history_list.addItem("Ride history feature coming soon!")
-        
-    # ========== ADD THESE 2 METHODS TO PROFILEWINDOW ==========
+    
     def show_ride_context_menu(self, position):
         """Show context menu for ride item"""
         item = self.my_rides_list.itemAt(position)
@@ -712,7 +838,6 @@ class ProfileWindow(QDialog):
             else:
                 QMessageBox.warning(self, "Error", 
                     f"Failed to cancel ride: {response.get('message', 'Unknown error')}")
-    # ========== END OF 2 NEW METHODS ==========
 
     def edit_profile(self):
         """Open profile editing dialog based on user role"""
@@ -949,52 +1074,65 @@ class ProfileWindow(QDialog):
         self.load_driver_rides()
 
     def load_driver_cars(self):
-        """Load driver's cars for the combo box"""
-        if not self.user:
+        """Load driver's cars"""
+        if not self.user_data:
             return
         
         cars_req = {
             "action": "update_personal_info",
             "type_of_connection": "get_cars",
-            "userID": self.user["userID"]
+            "userID": self.user_data["userID"]
         }
         
-        response = send_request_to_gateway(cars_req)
-        self.driver_car_combo.clear()
-        self.driver_car_combo.addItem("No car selected (click to add in Profile)", None)
+        response = self.send_static_request(cars_req)
+        self.cars_list.clear()
+        self.edit_ride_car.clear()
         
         if response.get("status") == "200":
             cars = response.get("data", [])
             for car in cars:
-                display_text = f"{car.get('cartype', 'Unknown')} - {car.get('carPlate', 'No Plate')} ({car.get('capacity', 0)} seats)"
-                self.driver_car_combo.addItem(display_text, car.get('carId'))
-            
-            if cars:
-                self.status_bar.showMessage(f"Loaded {len(cars)} car(s)")
-                # Auto-select first car if available
-                self.driver_car_combo.setCurrentIndex(1)
-            else:
-                self.status_bar.showMessage("No cars found - Add cars in Profile to get started")
-        else:
-            self.status_bar.showMessage("Error loading cars")
-        def load_driver_rides(self):
-            """Load driver's rides"""
-            if not self.user_data:
-                return
-            
-            rides_req = {
-                "action": "update_personal_info",
-                "type_of_connection": "give_all_rides",
-                "userID": self.user_data["userID"]
-            }
-            
-            response = self.send_static_request(rides_req)
-            self.rides_list.clear()
-            
-            if response.get("status") == "200":
-                rides = response.get("data", [])
+                item_text = f"{car.get('cartype', 'Unknown')} - {car.get('carPlate', 'No Plate')} ({car.get('capacity', 0)} seats)"
+                self.cars_list.addItem(item_text)
+                self.edit_ride_car.addItem(f"{car.get('carPlate', '')} - {car.get('cartype', '')}", car.get('carId'))
+
+    def load_driver_rides(self):
+        """Load driver's rides"""
+        if not self.user_data:
+            return
+        
+        rides_req = {
+            "action": "update_personal_info",
+            "type_of_connection": "give_all_rides",
+            "userID": self.user_data["userID"]
+        }
+        
+        response = self.send_static_request(rides_req)
+        self.rides_list.clear()
+        
+        if response.get("status") == "200":
+            rides = response.get("data", [])
+            if rides:
                 for ride in rides:
-                    item_text = f"From {ride.get('sourceID', 'Unknown')} - To AUB: {ride.get('startTime', '')} - From AUB: {ride.get('endTime', '')}"
+                    # Convert minutes to formatted time strings
+                    start_time_minutes = ride.get('startTime', 0)
+                    end_time_minutes = ride.get('endTime', 0)
+                    
+                    start_time_h = start_time_minutes // 60
+                    start_time_m = start_time_minutes % 60
+                    start_time = (str(start_time_h) if start_time_h >= 10 else "0"+str(start_time_h)) + ":" + (str(start_time_m) if start_time_m >= 10 else "0"+str(start_time_m))
+
+                    end_time_h = end_time_minutes // 60
+                    end_time_m = end_time_minutes % 60
+                    end_time = (str(end_time_h) if end_time_h >= 10 else "0"+str(end_time_h)) + ":" + (str(end_time_m) if end_time_m >= 10 else "0"+str(end_time_m))
+
+                    # Extract source ID for display
+                    ride_id = ride.get('sourceID', 'Unknown').split("_")
+                    if len(ride_id) == 2:
+                        ride_id = float(ride_id[0]) + float(ride_id[1])
+                    else:
+                        ride_id = ride_id[0]
+
+                    item_text = f"From {ride_id} - To AUB: {start_time} - From AUB: {end_time}"
                     item = QListWidgetItem(item_text)
                     item.setData(Qt.UserRole, ride)
                     self.rides_list.addItem(item)
@@ -1009,7 +1147,6 @@ class ProfileWindow(QDialog):
             
             # Load ride details into form
             ride_data = selected_items[0].data(Qt.UserRole)
-            
             # Populate the form fields with the selected ride data
             if ride_data:
                 # Set source
@@ -1020,19 +1157,23 @@ class ProfileWindow(QDialog):
                 else:
                     self.edit_ride_source.setCurrentText(source)
                 
-                # Set times (convert from string to QTime)
-                start_time = ride_data.get("startTime", "08:00")
-                end_time = ride_data.get("endTime", "16:00")
+                # CORRECTED: Convert minutes to QTime objects
+                start_time_minutes = ride_data.get('startTime', 0)
+                end_time_minutes = ride_data.get('endTime', 0)
                 
-                try:
-                    start_qtime = QTime.fromString(start_time, "HH:mm")
-                    end_qtime = QTime.fromString(end_time, "HH:mm")
-                    self.edit_ride_to_time.setTime(start_qtime)
-                    self.edit_ride_from_time.setTime(end_qtime)
-                except:
-                    # Fallback to default times
-                    self.edit_ride_to_time.setTime(QTime(8, 0))
-                    self.edit_ride_from_time.setTime(QTime(16, 0))
+                # Convert minutes to hours and minutes
+                start_time_h = start_time_minutes // 60
+                start_time_m = start_time_minutes % 60
+                end_time_h = end_time_minutes // 60
+                end_time_m = end_time_minutes % 60
+                
+                # Create QTime objects
+                start_qtime = QTime(start_time_h, start_time_m)
+                end_qtime = QTime(end_time_h, end_time_m)
+                
+                # Set the QTimeEdit widgets with QTime objects
+                self.edit_ride_to_time.setTime(start_qtime)
+                self.edit_ride_from_time.setTime(end_qtime)
                 
                 # Store the ride ID for update/remove operations
                 self.selected_ride_id = ride_data.get("rideID")
@@ -1108,7 +1249,7 @@ class ProfileWindow(QDialog):
 
     def update_selected_car(self):
         """Update the selected car"""
-        if not hasattr(self, 'selected_car_id') or not self.selected_car_id:
+        if not self.selected_car_id:
             QMessageBox.warning(self, "Error", "No car selected")
             return
         
@@ -1154,7 +1295,7 @@ class ProfileWindow(QDialog):
 
     def remove_selected_car(self):
         """Remove the selected car"""
-        if not hasattr(self, 'selected_car_id') or not self.selected_car_id:
+        if not self.selected_car_id:
             QMessageBox.warning(self, "Error", "No car selected")
             return
         
@@ -1195,16 +1336,35 @@ class ProfileWindow(QDialog):
             return
         
         car_id = self.edit_ride_car.currentData()
+
+        # Convert times to minutes
+        to_time_minutes = int(to_time.split(":")[0]) * 60 + int(to_time.split(":")[1])
+        from_time_minutes = int(from_time.split(":")[0]) * 60 + int(from_time.split(":")[1])
+
+        zones_coordinates = {
+            "Dahyeh": {"lat": 33.8500, "lng": 35.4833},
+            "Haret Hreik": {"lat": 33.8400, "lng": 35.5000},
+            "Khaldeh": {"lat": 33.8069, "lng": 35.4939},
+            "Jbeil": {"lat": 34.1211, "lng": 35.6481},
+            "Baalback": {"lat": 34.0058, "lng": 36.2181},
+            "Chwayfet": {"lat": 33.8667, "lng": 35.5667},
+            "Baabda": {"lat": 33.8333, "lng": 35.5333},
+            "Mansouriyeh": {"lat": 33.8667, "lng": 35.5500},
+            "Nabatiyeh": {"lat": 33.3783, "lng": 35.4833},
+            "Tyre": {"lat": 33.2708, "lng": 35.1961},
+            "Tripoli": {"lat": 34.4367, "lng": 35.8497},
+            "Hermel": {"lat": 34.3942, "lng": 36.3847}
+        }
         
         ride_req = {
             "action": "update_personal_info",
             "type_of_connection": "add_ride",
             "userID": self.user_data["userID"],
             "carId": car_id,
-            "source": source,
-            "destination": "American University of Beirut",
-            "startTime": to_time,
-            "endTime": from_time,
+            "source": (zones_coordinates[source]["lat"], zones_coordinates[source]["lng"]),
+            "destination": (33.9006, 35.4812),
+            "startTime": to_time_minutes,
+            "endTime": from_time_minutes,
             "scheduleID": self.user_data["userID"]
         }
         
@@ -1217,7 +1377,7 @@ class ProfileWindow(QDialog):
 
     def update_selected_ride(self):
         """Update the selected ride"""
-        if not hasattr(self, 'selected_ride_id') or not self.selected_ride_id:
+        if not self.selected_ride_id:
             QMessageBox.warning(self, "Error", "No ride selected")
             return
         
@@ -1232,23 +1392,41 @@ class ProfileWindow(QDialog):
         
         car_id = self.edit_ride_car.currentData()
         
-        # For update, we need to implement an update_ride backend function
-        # Since you don't have it yet, show info message
-        QMessageBox.information(self, "Info", "Update ride feature requires backend implementation. Please remove and re-add the ride for now.")
+        # Convert times to minutes
+        to_time_minutes = int(to_time.split(":")[0]) * 60 + int(to_time.split(":")[1])
+        from_time_minutes = int(from_time.split(":")[0]) * 60 + int(from_time.split(":")[1])
+        
+        zones_coordinates = {
+            "Dahyeh": {"lat": 33.8500, "lng": 35.4833},
+            "Haret Hreik": {"lat": 33.8400, "lng": 35.5000},
+            "Khaldeh": {"lat": 33.8069, "lng": 35.4939},
+            "Jbeil": {"lat": 34.1211, "lng": 35.6481},
+            "Baalback": {"lat": 34.0058, "lng": 36.2181},
+            "Chwayfet": {"lat": 33.8667, "lng": 35.5667},
+            "Baabda": {"lat": 33.8333, "lng": 35.5333},
+            "Mansouriyeh": {"lat": 33.8667, "lng": 35.5500},
+            "Nabatiyeh": {"lat": 33.3783, "lng": 35.4833},
+            "Tyre": {"lat": 33.2708, "lng": 35.1961},
+            "Tripoli": {"lat": 34.4367, "lng": 35.8497},
+            "Hermel": {"lat": 34.3942, "lng": 36.3847}
+        }
         
         update_req = {
             "action": "update_personal_info",
-            "type_of_connection": "update_ride",
+            "type_of_connection": "edit_ride",
             "rideID": self.selected_ride_id,
             "userID": self.user_data["userID"],
             "carId": car_id,
-            "source": source,
-            "destination": "American University of Beirut",
-            "startTime": to_time,
-            "endTime": from_time
+            "source": (zones_coordinates[source]["lat"], zones_coordinates[source]["lng"]),
+            "destination": (33.9006, 35.4812),
+            "startTime": to_time_minutes,
+            "endTime": from_time_minutes,
+            "scheduleID": self.user_data["userID"]
         }
         
         response = self.send_static_request(update_req)
+        print(update_req)
+        print(response)
         if response.get("status") == "200":
             QMessageBox.information(self, "Success", "Ride updated successfully!")
             self.load_driver_rides()
@@ -1296,7 +1474,12 @@ class ProfileWindow(QDialog):
         
         response = self.send_static_request(zone_req)
         if response.get("status") == "200":
-            zone_name = response.get("data", {}).get("zoneName", "")
+            zone_data = response.get("data", {})
+            if isinstance(zone_data, dict):
+                zone_name = zone_data.get("zoneName", "")
+            else:
+                zone_name = str(zone_data)
+                
             if zone_name:
                 # Find and set the zone in combobox
                 index = self.edit_zone.findText(zone_name)
@@ -1343,6 +1526,7 @@ class ProfileWindow(QDialog):
                 "Tripoli": {"lat": 34.4367, "lng": 35.8497},
                 "Hermel": {"lat": 34.3942, "lng": 36.3847}
             }
+            
             # 2. Update zone
             if new_zone:
                 zone_req = {
@@ -1350,8 +1534,8 @@ class ProfileWindow(QDialog):
                     "type_of_connection": "update_zone",
                     "userID": self.user_data["userID"],
                     "zone": new_zone,
-                    "zoneX" : zones_coordinates[new_zone]["lat"],
-                    "zoneY" : zones_coordinates[new_zone]["lng"]
+                    "zoneX": zones_coordinates[new_zone]["lat"],
+                    "zoneY": zones_coordinates[new_zone]["lng"]
                 }
                 zone_response = self.send_static_request(zone_req)
 
@@ -2903,7 +3087,11 @@ class AUBusUltimateGUI(QMainWindow):
                 self.status_bar.showMessage(f"Request accepted with {passenger_username} ✅")
 
                 # give the management server a moment to register / exchange info, then open chat
-                QTimer.singleShot(500, lambda: self.open_p2p_chat(passenger_username))
+                QTimer.singleShot(500, lambda: self.open_p2p_chat(
+                    passenger_username, 
+                    ride_id=ride_id,
+                    management_server=GATEWAY_HOST
+                ))
 
                 
             else:
@@ -2930,7 +3118,7 @@ class AUBusUltimateGUI(QMainWindow):
         if self.user and self.user.get("isDriver"):
             self.refresh_requests()
             
-    # ========== ADD THESE 3 METHODS HERE ==========
+    # ========== ADD THESE 5 METHODS HERE ==========
     def refresh_driver_my_rides(self):
         """Refresh driver's own rides in driver tab"""
         if not self.user:
@@ -2953,21 +3141,74 @@ class AUBusUltimateGUI(QMainWindow):
                 return
             
             for ride in rides:
-                direction_emoji = "➡️" if ride.get("direction") == "to_aub" else "⬅️"
-                source = ride.get("source_name", "Unknown")
-                dest = ride.get("dest_name", "Unknown")
-                start = ride.get("startTime", "N/A")
-                end = ride.get("endTime", "N/A")
-                car = ride.get("car_plate", "N/A")
-                
-                item_text = f"{direction_emoji} {source} → {dest} | ⏱ {start}-{end} | 🚗 {car}"
+                ride_id = ride.get('sourceID', 'Unknown')
+                start_time = ride.get('startTime', '08:00')
+                end_time = ride.get('endTime', '16:00')
+
+                item_text = f"From {ride_id} - To AUB: {start_time} - From AUB: {end_time}"
                 item = QListWidgetItem(item_text)
                 item.setData(Qt.UserRole, ride)
                 self.driver_my_rides_list.addItem(item)
             
+            # Enable context menu for deleting rides
+            self.driver_my_rides_list.setContextMenuPolicy(Qt.CustomContextMenu)
+            self.driver_my_rides_list.customContextMenuRequested.connect(self.show_driver_ride_context_menu)
+            
             self.status_bar.showMessage(f"You have {len(rides)} active ride(s)")
         else:
             self.status_bar.showMessage("Error loading rides")
+
+    def show_driver_ride_context_menu(self, position):
+        """Show context menu for driver's ride in driver tab"""
+        item = self.driver_my_rides_list.itemAt(position)
+        if not item or item.text().startswith("No active"):
+            return
+        
+        ride_data = item.data(Qt.UserRole)
+        if not ride_data:
+            return
+        
+        menu = QMenu()
+        delete_action = menu.addAction("❌ Delete This Ride")
+        
+        action = menu.exec_(self.driver_my_rides_list.mapToGlobal(position))
+        
+        if action == delete_action:
+            self.delete_driver_ride(ride_data)
+
+    def delete_driver_ride(self, ride_data):
+        """Delete a ride from driver tab"""
+        ride_id = ride_data.get("rideID")
+        source_id = ride_data.get('sourceID', 'Unknown')
+        start_time = ride_data.get('startTime', '08:00')
+        end_time = ride_data.get('endTime', '16:00')
+        
+        reply = QMessageBox.question(self, "Confirm Deletion",
+            f"Are you sure you want to delete this ride?\n\n"
+            f"From: {source_id}\n"
+            f"To AUB: {start_time}\n"
+            f"From AUB: {end_time}\n\n"
+            f"This action cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            delete_req = {
+                "action": "update_personal_info",
+                "type_of_connection": "remove_ride",
+                "rideID": ride_id,
+                "userID": self.user["userID"]
+            }
+            
+            response = send_request_to_gateway(delete_req)
+            
+            if response.get("status") == "200":
+                QMessageBox.information(self, "Success", "Ride deleted successfully!")
+                # Refresh the list to show remaining rides
+                self.refresh_driver_my_rides()
+                self.status_bar.showMessage("Ride deleted ✅")
+            else:
+                QMessageBox.warning(self, "Error", 
+                    f"Failed to delete ride: {response.get('message', 'Unknown error')}")
     
     def show_driver_ride_menu(self, position):
         """Show context menu for driver's ride"""
@@ -3057,7 +3298,7 @@ class AUBusUltimateGUI(QMainWindow):
         
         print(f"[Passenger] Requesting rides: {payload}")
         response = send_request_to_gateway(payload)
-        
+        print(response)
         if response.get("status") == "200":
             data = response.get("data", {})
             candidates = data.get("candidates", [])
@@ -3161,6 +3402,7 @@ class AUBusUltimateGUI(QMainWindow):
             # Check for new accepted requests
             for req in accepted_requests:
                 req_id = req.get("requestID")
+                ride_id = req.get('rideID')
                 
                 # Only notify if we haven't notified about this request before
                 if req_id not in self.notified_accepted_requests:
@@ -3179,7 +3421,12 @@ class AUBusUltimateGUI(QMainWindow):
                     self.status_bar.showMessage(f"Request accepted by {driver_username} ✅")
                     
                     # Open P2P chat with driver
-                    QTimer.singleShot(500, lambda: self.open_p2p_chat(driver_username))
+                    QTimer.singleShot(500, lambda: self.open_p2p_chat(
+                        driver_username, 
+                        ride_id=ride_id,
+                        management_server=GATEWAY_HOST
+                    ))
+
     
     def show_route_to_driver(self):
         """Show route to selected driver on map"""
@@ -3215,7 +3462,7 @@ class AUBusUltimateGUI(QMainWindow):
         self.status_bar.showMessage("Route displayed on map 🗺")
 
 
-    def open_p2p_chat(self, peer_username, management_server=None, management_port=10000):
+    def open_p2p_chat(self, peer_username, ride_id = None, management_server=None, management_port=10000):
         """Open P2P chat window with peer"""
         if not self.user:
             QMessageBox.warning(self, "Error", "Not logged in")
@@ -3230,6 +3477,7 @@ class AUBusUltimateGUI(QMainWindow):
                 parent=self,
                 my_username=self.user["username"],
                 peer_username=peer_username,
+                ride_id=ride_id,
                 management_server=management_server,
                 management_port=management_port
             )
